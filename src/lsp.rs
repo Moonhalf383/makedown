@@ -1,17 +1,23 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
+use std::path::PathBuf;
+
+use url::Url;
 
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, Position, PublishDiagnosticsParams, Range,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri,
+    DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams, Position,
+    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri,
 };
+
+mod workspace;
 
 use crate::formatter::{FormatError, Formatter};
 use crate::linter::Linter;
 use crate::parser::DiagnosticSeverity as MarkfileSeverity;
+use workspace::ProjectView;
 
 // 保存编辑器中的未落盘内容与最新文档版本。
 struct OpenDocument {
@@ -81,15 +87,57 @@ impl LanguageServer {
         }
     }
 
-    // 为缓存中的完整文本生成语法和质量诊断。
+    // 对其他打开文件重算诊断，使未保存的定义文件即时影响导入者。
+    fn refreshed_diagnostics_except(&self, changed: &Uri) -> Vec<Notification> {
+        let mut uris = self
+            .documents
+            .keys()
+            .filter(|uri| *uri != changed)
+            .collect::<Vec<_>>();
+        uris.sort_by_key(|uri| uri.as_str());
+        uris.into_iter().map(|uri| self.diagnostics(uri)).collect()
+    }
+
+    // 将文件 URI 映射为磁盘路径，不对打开文档执行磁盘读取。
+    fn path(uri: &Uri) -> Option<PathBuf> {
+        Url::parse(uri.as_str()).ok()?.to_file_path().ok()
+    }
+
+    // 收集打开文档的未保存文本作为项目分析优先使用的源码。
+    fn overlays(&self) -> HashMap<PathBuf, String> {
+        let mut overlays = HashMap::new();
+        for (uri, document) in &self.documents {
+            if let Some(path) = Self::path(uri) {
+                if let Ok(canonical) = path.canonicalize() {
+                    overlays.insert(canonical, document.text.clone());
+                }
+                overlays.insert(path, document.text.clone());
+            }
+        }
+        overlays
+    }
+
+    // 为缓存中的完整文本生成语法、质量与跨文件诊断。
     fn diagnostics(&self, uri: &Uri) -> Notification {
         let document = self
             .documents
             .get(uri)
             .expect("diagnostics require an open document");
-        let diagnostics = Linter::new()
-            .lint_source(Path::new(uri.as_str()), &document.text)
+        let path = Self::path(uri).unwrap_or_else(|| PathBuf::from(uri.as_str()));
+        let mut diagnostics = Linter::new()
+            .lint_source(&path, &document.text)
             .diagnostics()
+            .to_vec();
+        if let Some(real_path) = Self::path(uri)
+            && let Some(view) = ProjectView::analyze(&real_path, &self.overlays())
+        {
+            for item in view.diagnostics_for(&real_path) {
+                if !diagnostics.iter().any(|existing| existing == &item) {
+                    diagnostics.push(item);
+                }
+            }
+        }
+        let diagnostics = diagnostics
             .iter()
             .map(|item| {
                 let line = item.line().unwrap_or(1).saturating_sub(1);
@@ -124,6 +172,25 @@ impl LanguageServer {
 
     // 对打开的文档返回完整替换编辑而不操作磁盘。
     fn request(&self, request: Request) -> Response {
+        if request.method == "textDocument/definition" {
+            let params: GotoDefinitionParams = match serde_json::from_value(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return Response::new_err(
+                        request.id,
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        error.to_string(),
+                    );
+                }
+            };
+            let uri = &params.text_document_position_params.text_document.uri;
+            let location = Self::path(uri).and_then(|path| {
+                self.documents.get(uri)?;
+                ProjectView::analyze(&path, &self.overlays())?
+                    .definition(params.text_document_position_params.position)
+            });
+            return Response::new_ok(request.id, location);
+        }
         if request.method != "textDocument/formatting" {
             return Response::new_err(
                 request.id,
@@ -194,6 +261,7 @@ pub fn serve() -> Result<(), Box<dyn Error>> {
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         document_formatting_provider: Some(lsp_types::OneOf::Left(true)),
+        definition_provider: Some(lsp_types::OneOf::Left(true)),
         ..Default::default()
     };
     connection.initialize(serde_json::to_value(capabilities)?)?;
@@ -210,9 +278,16 @@ pub fn serve() -> Result<(), Box<dyn Error>> {
             }
             Message::Notification(note) => {
                 if let Some(notification) = server.notification(note)? {
+                    let changed: PublishDiagnosticsParams =
+                        serde_json::from_value(notification.params.clone())?;
                     connection
                         .sender
                         .send(Message::Notification(notification))?;
+                    for notification in server.refreshed_diagnostics_except(&changed.uri) {
+                        connection
+                            .sender
+                            .send(Message::Notification(notification))?;
+                    }
                 }
             }
             Message::Response(_) => {}
@@ -290,6 +365,34 @@ mod tests {
             .unwrap();
         let cleared: PublishDiagnosticsParams = serde_json::from_value(closed.params).unwrap();
         assert!(cleared.diagnostics.is_empty());
+    }
+
+    // 验证无文件路径的编辑器缓冲区只接收单文件诊断。
+    #[test]
+    fn untitled_document_does_not_emit_project_file_errors() {
+        let uri: Uri = "untitled:Markfile-1".parse().unwrap();
+        let mut server = LanguageServer::default();
+        let opened = server
+            .notification(Notification::new(
+                "textDocument/didOpen".into(),
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri,
+                        language_id: "mf".into(),
+                        version: 1,
+                        text: "---\n# build\n- done\n---\n> build\n".into(),
+                    },
+                },
+            ))
+            .unwrap()
+            .unwrap();
+        let diagnostics: PublishDiagnosticsParams = serde_json::from_value(opened.params).unwrap();
+        assert!(
+            diagnostics
+                .diagnostics
+                .iter()
+                .all(|item| item.code != Some(lsp_types::NumberOrString::String("P001".into())))
+        );
     }
 
     // 验证诊断按 UTF-16 计算行尾且旧版本更新不会覆盖新内容。

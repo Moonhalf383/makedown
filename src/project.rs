@@ -25,6 +25,15 @@ pub struct AnalysisDiagnostic {
 }
 
 impl AnalysisDiagnostic {
+    // 将缺失模块错误映射到引用该模块的指令位置。
+    pub(crate) fn at(&self, file: PathBuf, line: usize) -> Self {
+        Self {
+            file,
+            line: Some(line),
+            ..self.clone()
+        }
+    }
+
     /// 将单文件解析诊断附上文件路径。
     pub fn from_parse(file: PathBuf, diagnostic: &crate::parser::Diagnostic) -> Self {
         Self {
@@ -154,7 +163,9 @@ impl ProjectAnalyzer {
         mut progress: impl FnMut(&ModulePath) -> std::io::Result<()>,
     ) -> std::io::Result<AnalysisResult> {
         let mut state = AnalysisState::new(self, Some(start));
-        state.load_reachable_modules(&mut progress, &mut |_, _| {})?;
+        state.load_reachable_modules(&mut progress, &mut |_, _| {}, &mut |path: &Path| {
+            fs::read_to_string(path)
+        })?;
         Ok(state.resolve())
     }
 
@@ -176,7 +187,31 @@ impl ProjectAnalyzer {
         let (modules, diagnostics) = self.discover_modules()?;
         state.pending = modules;
         state.diagnostics.extend(diagnostics);
-        state.load_reachable_modules(&mut progress, &mut inspect)?;
+        state.load_reachable_modules(&mut progress, &mut inspect, &mut |path: &Path| {
+            fs::read_to_string(path)
+        })?;
+        Ok(state.resolve())
+    }
+
+    /// 从指定模块分析导入可达图，优先通过调用方提供的源码读取器获取文本。
+    pub fn analyze_module_with_sources(
+        &self,
+        module: ModulePath,
+        read_source: impl FnMut(&Path) -> std::io::Result<String>,
+    ) -> std::io::Result<AnalysisResult> {
+        self.analyze_module_with_sources_and_modules(module, read_source, |_, _| {})
+    }
+
+    // 向编辑器提供分析过程中已解析的模块以定位目标声明。
+    pub(crate) fn analyze_module_with_sources_and_modules(
+        &self,
+        module: ModulePath,
+        mut read_source: impl FnMut(&Path) -> std::io::Result<String>,
+        mut inspect: impl FnMut(&Path, &ParsedModule),
+    ) -> std::io::Result<AnalysisResult> {
+        let mut state = AnalysisState::new(self, None);
+        state.pending.push(module);
+        state.load_reachable_modules(&mut |_| Ok(()), &mut inspect, &mut read_source)?;
         Ok(state.resolve())
     }
 
@@ -348,6 +383,7 @@ impl<'a> AnalysisState<'a> {
         &mut self,
         progress: &mut impl FnMut(&ModulePath) -> std::io::Result<()>,
         inspect: &mut impl FnMut(&Path, &ParsedModule),
+        read_source: &mut impl FnMut(&Path) -> std::io::Result<String>,
     ) -> std::io::Result<()> {
         while let Some(namespace) = self.pending.pop() {
             if !self.visited.insert(namespace.clone()) {
@@ -365,7 +401,7 @@ impl<'a> AnalysisState<'a> {
                 ));
                 continue;
             }
-            let source = match fs::read_to_string(&file) {
+            let source = match read_source(&file) {
                 Ok(source) => source,
                 Err(error) => {
                     self.diagnostics.push(AnalysisDiagnostic::error(

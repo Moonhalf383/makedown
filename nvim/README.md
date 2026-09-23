@@ -1,6 +1,6 @@
 # 在 Neovim 中编辑 Markfile
 
-支持 Neovim 0.11 及以上版本。高亮由独立的 Vim syntax 文件提供，无需 LSP；`mkd-lsp` 额外提供未保存内容的诊断和全文格式化。
+支持 Neovim 0.11 及以上版本。高亮由独立的 Vim syntax 文件提供，无需 LSP；`mkd-lsp` 提供未保存内容的诊断、跨文件引用检查、跳转定义和全文格式化。
 
 ```sh
 cargo build --bin mkd-lsp
@@ -30,8 +30,9 @@ LazyVim 初始化时会重建 `runtimepath`。如果把 `dofile` 放在 `require
 ## 范围与后续架构
 
 - `src/bin/mkd-lsp.rs`：独立进程入口，通过 stdin/stdout 使用 LSP JSON-RPC；stdout 不输出普通日志。
-- `src/lsp.rs`：维护打开文档的内存全文和版本；对 `didOpen`、`didChange` 发布语法与质量诊断，对 `didClose` 清空诊断；响应 `textDocument/formatting`。采用全文同步；诊断范围按 UTF-16 编码。
-- `src/parser.rs`、`src/linter.rs`、`src/formatter.rs`：与 CLI 共享单文件语言规则；编辑器内容不会从磁盘读取。
+- `src/lsp.rs`：维护打开文档的内存全文和版本；对 `didOpen`、`didChange` 发布语法、质量与跨文件诊断，对 `didClose` 清空诊断并重新分析其他打开的文件；响应 `textDocument/formatting` 和 `textDocument/definition`。采用全文同步；诊断范围按 UTF-16 编码。
+- `src/lsp/workspace.rs`：按当前 `.mf` 向上找到最近的 `main.mf`，从当前模块加载导入可达图；打开文档优先使用未保存内容，其他模块回退磁盘。支持导入路径/显式别名、局部或导入目标依赖、公开声明跳转到目标定义。
+- `src/parser.rs`、`src/linter.rs`、`src/formatter.rs`、`src/project.rs`：与 CLI 共享解析、静态检查、格式化及跨模块分析规则；LSP 不会将编辑器内容写入磁盘。
 - `nvim/ftdetect/mf.vim`、`nvim/syntax/mf.vim`：识别文件类型并高亮分隔线、目标、导入/依赖、锚点、别名和规格。
 
-此阶段**不提供跨文件语义诊断、自动补全或跳转定义**。实现这些能力时需要给项目分析器提供内存优先的源码读取接口、可维护的项目索引，以及更精确的语法节点位置。高亮采用轻量正则，可能把描述中行首的结构标记当作高亮标记；诊断仍以解析器为准。
+当前 LSP 只分析**打开文件的导入可达图**，不是 `mkd lint --all` 的全项目扫描；直接缺失的模块会在引用文件的导入行提示。依赖模块有独立错误时，打开该模块可查看其诊断。目前每次文档变化会重新分析其他已打开文档，尚无增量项目索引；大型项目可能需要后续缓存。未实现自动补全、引用查找和重命名。高亮采用轻量正则，可能把描述中行首的结构标记当作高亮标记；诊断仍以解析器为准。
