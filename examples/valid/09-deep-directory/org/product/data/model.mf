@@ -1,0 +1,11 @@
+---
+# define_model
+定义产品领域中的核心数据模型。
+- 每个实体都有稳定标识。
+# validate_model
+> define_model
+验证领域模型的不变量。
+- 非法状态无法被持久化。
+- 必填关系在保存前得到检查。
+---
+> validate_model

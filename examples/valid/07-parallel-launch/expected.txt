@@ -1,0 +1,2 @@
+start=launch
+stages=3

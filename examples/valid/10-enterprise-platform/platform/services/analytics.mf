@@ -1,0 +1,11 @@
+> super::infra::database::database_ready
+> super::infra::cache::cache_ready
+---
+# ready
+> database_ready
+> cache_ready
+准备分析服务。
+- 分析查询不会影响交易负载。
+- 热点指标能够从缓存读取。
+---
+> ready

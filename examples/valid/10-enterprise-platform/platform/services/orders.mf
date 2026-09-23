@@ -1,0 +1,11 @@
+> super::infra::database::database_ready
+> super::infra::messaging::messaging_ready
+---
+# ready
+> database_ready
+> messaging_ready
+准备订单服务。
+- 订单状态转换满足业务约束。
+- 订单事件能够可靠发布。
+---
+> ready

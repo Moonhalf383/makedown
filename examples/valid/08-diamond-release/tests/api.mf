@@ -1,0 +1,9 @@
+> super::shared::schema::freeze_schema
+---
+# verify_api
+> freeze_schema
+验证接口符合共享契约。
+- 所有公开接口均通过契约测试。
+- 不兼容变更会阻止发布。
+---
+> verify_api

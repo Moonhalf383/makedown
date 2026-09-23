@@ -1,0 +1,14 @@
+> crate::research::audience::summary
+---
+# draft
+> summary
+Draft a product guide for the identified audience.
+- The guide starts with the primary user goal.
+- The guide includes an end-to-end example.
+
+# working-copy
+> draft
+Maintain editorial notes during revision.
+- Editorial notes are not published outside this module.
+---
+> draft

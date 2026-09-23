@@ -1,0 +1,9 @@
+> self::stage04::aggregate as next_stage
+---
+# verify
+> next_stage
+校验汇总数据的完整性。
+- 缺失字段会被明确列出。
+- 校验结果可以重复得到相同结论。
+---
+> verify

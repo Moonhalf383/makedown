@@ -1,0 +1,7 @@
+---
+# review
+Review a release candidate for clarity and completeness.
+- Every user-visible change is represented in the notes.
+- Ambiguous wording is revised before approval.
+---
+> review

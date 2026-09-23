@@ -1,0 +1,11 @@
+> super::services::notifications::ready as notifications_ready
+> super::services::analytics::ready as analytics_ready
+---
+# check
+> notifications_ready
+> analytics_ready
+执行平台合规检查。
+- 通知内容满足留痕要求。
+- 分析数据满足保留与删除策略。
+---
+> check

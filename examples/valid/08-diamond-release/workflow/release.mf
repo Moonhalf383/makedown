@@ -1,0 +1,13 @@
+> super::build::backend::package_backend
+> super::build::frontend::package_frontend
+> super::quality::gate::approve
+---
+# release
+> package_backend
+> package_frontend
+> approve
+组装并批准完整发布包。
+- 前后端制品使用相同契约版本。
+- 质量门禁结果随发布包归档。
+---
+> release

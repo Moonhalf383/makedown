@@ -1,0 +1,9 @@
+> self::stage05::enrich as next_stage
+---
+# aggregate
+> next_stage
+按业务维度聚合数据。
+- 每条有效记录只参与一次聚合。
+- 聚合总量与输入总量一致。
+---
+> aggregate

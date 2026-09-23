@@ -1,0 +1,15 @@
+---
+
+# collect_schema
+收集前后端共享的数据契约。
+- 每个字段都有类型和含义说明。
+
+# freeze_schema
+> collect_schema
+冻结本次发布使用的共享契约。
+- 冻结后生成不可变版本号。
+- 所有消费方引用同一版本。
+
+---
+
+> freeze_schema

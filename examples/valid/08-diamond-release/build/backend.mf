@@ -1,0 +1,9 @@
+> super::shared::schema::freeze_schema
+---
+# package_backend
+> freeze_schema
+构建后端服务制品。
+- 制品包含数据库迁移信息。
+- 制品依赖已冻结的共享契约。
+---
+> package_backend

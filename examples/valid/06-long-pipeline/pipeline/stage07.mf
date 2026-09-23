@@ -1,0 +1,9 @@
+> self::stage08::filter_invalid as next_stage
+---
+# deduplicate
+> next_stage
+消除不同来源中的重复记录。
+- 重复判断使用稳定的业务键。
+- 被合并记录保留来源信息。
+---
+> deduplicate

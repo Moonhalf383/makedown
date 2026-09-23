@@ -1,0 +1,9 @@
+> super::shared::schema::freeze_schema
+---
+# package_frontend
+> freeze_schema
+构建前端应用制品。
+- 静态资源包含内容指纹。
+- 客户端类型来自已冻结契约。
+---
+> package_frontend

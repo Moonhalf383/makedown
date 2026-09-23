@@ -1,0 +1,9 @@
+> crate::pipeline::stage01::deliver
+---
+# release
+> deliver
+发布完整的数据处理流水线。
+- 发布记录包含所有阶段的验收结果。
+- 发布后能够从原始数据生成最终报告。
+---
+> release

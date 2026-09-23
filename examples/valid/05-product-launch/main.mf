@@ -1,0 +1,26 @@
+> crate::research::audience::summary
+> crate::content::guide::draft
+> crate::quality::compliance::approve
+---
+
+# launch-plan
+>
+> summary
+> draft
+> approve
+Prepare a launch plan for the product guide.
+
+- The plan identifies the target audience.
+- The plan links the approved guide.
+- The plan lists launch risks and owners.
+
+# launch
+>
+> launch-plan
+Execute the approved product launch.
+
+- The launch only starts after a complete launch plan exists.
+- The result records the launch date and owner.
+
+---
+> launch

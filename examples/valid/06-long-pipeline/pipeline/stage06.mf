@@ -1,0 +1,9 @@
+> self::stage07::deduplicate as next_stage
+---
+# normalize
+> next_stage
+统一不同来源的数据格式。
+- 日期采用统一时区与格式。
+- 枚举值均映射到规范集合。
+---
+> normalize

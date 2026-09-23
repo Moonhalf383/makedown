@@ -1,0 +1,9 @@
+> self::model::validate
+---
+# publish
+> validate
+Publish the validated catalog.
+- Each catalog item has a stable identifier.
+- The published catalog can be consumed by clients.
+---
+> publish

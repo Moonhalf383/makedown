@@ -1,0 +1,9 @@
+> crate::catalog::api::publish
+---
+# deploy
+> publish
+Deploy the published catalog service.
+- Deployment uses the approved published artifact.
+- The service responds to a health check after deployment.
+---
+> deploy

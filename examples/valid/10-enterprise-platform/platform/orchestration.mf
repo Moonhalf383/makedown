@@ -1,0 +1,19 @@
+> self::services::identity::ready as identity_ready
+> self::services::orders::ready as orders_ready
+> self::services::notifications::ready as notifications_ready
+> self::services::analytics::ready as analytics_ready
+> self::quality::security::check as security_check
+> self::quality::compliance::check as compliance_check
+---
+# launch_platform
+> identity_ready
+> orders_ready
+> notifications_ready
+> analytics_ready
+> security_check
+> compliance_check
+协调平台所有服务和质量门禁。
+- 同名质量目标通过显式别名消除歧义。
+- 所有服务就绪后才允许平台发布。
+---
+> launch_platform

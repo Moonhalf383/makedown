@@ -1,0 +1,11 @@
+---
+# permission_matrix
+维护产品权限矩阵。
+- 每项能力都有明确角色范围。
+# authorize
+> permission_matrix
+验证接口访问控制规则。
+- 未授权请求被一致拒绝。
+- 授权决策可以被审计。
+---
+> authorize

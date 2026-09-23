@@ -1,0 +1,9 @@
+> crate::org::product::api::handler::publish_api
+---
+# expose_service
+> publish_api
+向外部用户开放深层模块中的服务。
+- 根模块能够稳定定位深层目标。
+- 服务发布记录包含全部前置检查。
+---
+> expose_service

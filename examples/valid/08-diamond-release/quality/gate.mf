@@ -1,0 +1,11 @@
+> super::tests::api::verify_api
+> super::tests::ui::verify_ui
+---
+# approve
+> verify_api
+> verify_ui
+执行跨端质量门禁。
+- 接口和界面测试均通过后才批准。
+- 门禁结果能够关联到构建版本。
+---
+> approve

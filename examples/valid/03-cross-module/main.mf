@@ -1,0 +1,9 @@
+> self::quality::review
+---
+# release-notes
+> review
+Create release notes suitable for publication.
+- The notes summarize user-visible changes.
+- The notes mention known compatibility concerns.
+---
+> release-notes

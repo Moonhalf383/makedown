@@ -1,0 +1,13 @@
+> crate::one::check
+> crate::two::check
+
+---
+
+# run
+> check
+使用发生冲突的默认别名。
+- 两个同名导入必须显式改名。
+
+---
+
+> run

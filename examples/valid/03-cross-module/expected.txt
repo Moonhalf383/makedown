@@ -1,0 +1,2 @@
+start=release-notes
+stages=2

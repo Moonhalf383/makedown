@@ -1,0 +1,9 @@
+> super::shared::schema::freeze_schema
+---
+# verify_ui
+> freeze_schema
+验证界面能够消费共享契约。
+- 主要用户流程均可完成。
+- 契约字段缺失时提供明确反馈。
+---
+> verify_ui

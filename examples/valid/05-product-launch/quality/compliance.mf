@@ -1,0 +1,13 @@
+---
+# checklist
+Create a compliance checklist for the guide.
+- The checklist covers required disclosures.
+- The checklist records the reviewer.
+
+# approve
+> checklist
+Approve the guide for launch.
+- Approval only succeeds when all checklist items pass.
+- The decision identifies the approving reviewer.
+---
+> approve

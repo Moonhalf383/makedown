@@ -1,0 +1,9 @@
+> crate::workflow::release::release
+---
+# ship
+> release
+交付经过构建与质量门禁的版本。
+- 交付物包含可追溯的版本标识。
+- 所有共享契约只冻结一次。
+---
+> ship

@@ -1,0 +1,17 @@
+---
+# draft-outline
+
+Create a working outline before writing the article.
+
+- The outline identifies an introduction, body, and conclusion.
+
+# article
+>
+> draft-outline
+Write the final article from the outline.
+
+- The article has an informative title.
+- The article explains the requested topic accurately.
+
+---
+> article

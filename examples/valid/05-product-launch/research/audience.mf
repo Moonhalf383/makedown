@@ -1,0 +1,17 @@
+---
+# interview-notes
+
+Collect interview notes from representative users.
+
+- Notes distinguish observed facts from assumptions.
+
+# summary
+>
+> interview-notes
+Summarize the audience needs.
+
+- The summary names primary user goals.
+- The summary lists evidence supporting each major conclusion.
+
+---
+> summary

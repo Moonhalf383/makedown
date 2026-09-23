@@ -1,0 +1,11 @@
+> super::services::identity::ready as identity_ready
+> super::services::orders::ready as orders_ready
+---
+# check
+> identity_ready
+> orders_ready
+执行平台安全检查。
+- 身份与订单边界通过威胁审查。
+- 不存在未处理的高危问题。
+---
+> check

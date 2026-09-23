@@ -1,0 +1,9 @@
+> super::data::model::validate_model
+---
+# validate_contract
+> validate_model
+验证接口契约与领域模型一致。
+- 请求字段能够映射到领域模型。
+- 响应字段不会泄露内部数据。
+---
+> validate_contract

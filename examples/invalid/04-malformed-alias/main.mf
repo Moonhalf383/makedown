@@ -1,0 +1,7 @@
+> crate::shared::check alias local_check
+---
+# run
+验证错误的别名语法。
+- 错误别名会产生语法诊断。
+---
+> run

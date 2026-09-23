@@ -1,0 +1,7 @@
+> sibling::shared::check
+---
+# run
+使用未定义的路径锚点。
+- 导入只能从 crate、self 或 super 开始。
+---
+> run

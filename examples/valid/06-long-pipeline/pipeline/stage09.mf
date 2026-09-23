@@ -1,0 +1,9 @@
+> self::stage10::receive as next_stage
+---
+# parse_input
+> next_stage
+解析接收到的原始数据。
+- 支持声明的全部输入格式。
+- 格式错误不会中断其他记录解析。
+---
+> parse_input

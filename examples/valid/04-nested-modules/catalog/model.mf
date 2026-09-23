@@ -1,0 +1,7 @@
+---
+# validate
+Validate source records for the catalog.
+- Every item has a non-empty title.
+- Duplicate stable identifiers are rejected.
+---
+> validate

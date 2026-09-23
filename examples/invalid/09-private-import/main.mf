@@ -1,0 +1,8 @@
+> crate::shared::hidden
+---
+# run
+> hidden
+尝试导入其他模块的私有目标。
+- 私有目标不能跨模块访问。
+---
+> run

@@ -1,0 +1,11 @@
+> super::infra::messaging::messaging_ready
+> super::infra::cache::cache_ready
+---
+# ready
+> messaging_ready
+> cache_ready
+准备通知服务。
+- 通知任务能够异步投递。
+- 重复通知受到幂等控制。
+---
+> ready

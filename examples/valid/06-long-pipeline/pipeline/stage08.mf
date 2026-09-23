@@ -1,0 +1,9 @@
+> self::stage09::parse_input as next_stage
+---
+# filter_invalid
+> next_stage
+移除不满足最低质量要求的记录。
+- 每条被移除记录都有明确原因。
+- 过滤规则能够独立测试。
+---
+> filter_invalid

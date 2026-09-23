@@ -1,0 +1,9 @@
+> self::stage06::normalize as next_stage
+---
+# enrich
+> next_stage
+补充分析所需的派生字段。
+- 派生字段能够追溯到原始字段。
+- 无法补充的字段保留原因说明。
+---
+> enrich

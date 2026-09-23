@@ -1,0 +1,2 @@
+start=greet
+stages=1

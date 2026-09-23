@@ -1,0 +1,13 @@
+> self::contract::validate_contract
+> super::shared::authorize
+> crate::global::policy::review_policy
+---
+# publish_api
+> validate_contract
+> authorize
+> review_policy
+发布经过契约、授权和全局策略检查的接口。
+- 接口只暴露批准的能力。
+- 发布结果包含契约版本和策略版本。
+---
+> publish_api

@@ -1,0 +1,6 @@
+---
+# greet
+Produce a concise greeting for the reader.
+- The output contains exactly one friendly sentence.
+---
+> greet

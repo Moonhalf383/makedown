@@ -1,0 +1,11 @@
+---
+# review_examples
+复核文档中的操作示例。
+- 每个示例均可独立执行成功。
+# publish_docs
+> review_examples
+发布与版本匹配的用户文档。
+- 文档包含升级和回退说明。
+- 文档版本与产品版本一致。
+---
+> publish_docs

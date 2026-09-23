@@ -1,0 +1,11 @@
+---
+# metric_catalog
+定义发布效果指标目录。
+- 每个指标都有口径与负责人。
+# verify_metrics
+> metric_catalog
+验证分析指标可以正确采集。
+- 关键事件没有重复或遗漏。
+- 仪表盘能够展示最新数据。
+---
+> verify_metrics

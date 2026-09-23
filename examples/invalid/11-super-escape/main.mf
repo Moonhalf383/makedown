@@ -1,0 +1,7 @@
+> super::outside::check
+---
+# run
+尝试从项目根继续访问上级目录。
+- super 不得越过项目根目录。
+---
+> run

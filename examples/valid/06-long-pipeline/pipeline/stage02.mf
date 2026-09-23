@@ -1,0 +1,9 @@
+> self::stage03::verify as next_stage
+---
+# prepare
+> next_stage
+准备报告所需的汇总数据。
+- 汇总结果覆盖所有有效记录。
+- 汇总过程不会改变原始数据。
+---
+> prepare

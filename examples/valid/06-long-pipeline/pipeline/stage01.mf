@@ -1,0 +1,9 @@
+> self::stage02::prepare as next_stage
+---
+# deliver
+> next_stage
+交付经过全部处理的数据报告。
+- 报告包含生成时间与数据版本。
+- 报告可以被业务人员直接阅读。
+---
+> deliver

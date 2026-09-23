@@ -1,0 +1,13 @@
+> crate::platform::orchestration::launch_platform
+
+---
+
+# launch
+> launch_platform
+发布企业级服务平台。
+- 发布覆盖身份、订单、通知和分析服务。
+- 发布完成后能够执行端到端业务流程。
+
+---
+
+> launch

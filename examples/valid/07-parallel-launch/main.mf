@@ -1,0 +1,23 @@
+> crate::domains::security::audit
+> crate::domains::performance::benchmark
+> crate::domains::accessibility::inspect
+> crate::domains::localization::translate
+> crate::domains::documentation::publish_docs
+> crate::domains::operations::prepare_ops
+> crate::domains::analytics::verify_metrics
+> crate::domains::support::train_support
+---
+# launch
+> audit
+> benchmark
+> inspect
+> translate
+> publish_docs
+> prepare_ops
+> verify_metrics
+> train_support
+并行完成各专业领域的发布准备。
+- 所有领域目标均通过验收后才允许发布。
+- 发布清单记录每个领域的负责人。
+---
+> launch
