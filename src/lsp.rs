@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use url::Url;
 
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, GotoDefinitionParams, Position,
-    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri,
+    CompletionOptions, CompletionParams, Diagnostic, DiagnosticSeverity,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentFormattingParams, GotoDefinitionParams, Position, PublishDiagnosticsParams, Range,
+    ReferenceParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextEdit, Uri,
 };
 
 mod workspace;
@@ -20,6 +21,7 @@ use crate::parser::DiagnosticSeverity as MarkfileSeverity;
 use workspace::ProjectView;
 
 // 保存编辑器中的未落盘内容与最新文档版本。
+#[derive(Clone)]
 struct OpenDocument {
     version: i32,
     text: String,
@@ -29,6 +31,8 @@ struct OpenDocument {
 #[derive(Default)]
 struct LanguageServer {
     documents: HashMap<Uri, OpenDocument>,
+    views: HashMap<PathBuf, ProjectView>,
+    index: Option<ProjectView>,
 }
 
 impl LanguageServer {
@@ -46,6 +50,7 @@ impl LanguageServer {
                         text: document.text,
                     },
                 );
+                self.invalidate_analysis();
                 Ok(Some(self.diagnostics(&uri)))
             }
             "textDocument/didChange" => {
@@ -66,6 +71,7 @@ impl LanguageServer {
                         .text
                         .clone();
                     document.version = params.text_document.version;
+                    self.invalidate_analysis();
                     return Ok(Some(self.diagnostics(&uri)));
                 }
                 Ok(None)
@@ -74,6 +80,7 @@ impl LanguageServer {
                 let params: DidCloseTextDocumentParams = serde_json::from_value(note.params)?;
                 let uri = params.text_document.uri;
                 self.documents.remove(&uri);
+                self.invalidate_analysis();
                 Ok(Some(Notification::new(
                     "textDocument/publishDiagnostics".into(),
                     PublishDiagnosticsParams {
@@ -87,15 +94,42 @@ impl LanguageServer {
         }
     }
 
+    // 丢弃已缓存的分析视图和项目索引。
+    fn invalidate_analysis(&mut self) {
+        self.views.clear();
+        self.index = None;
+    }
+
+    // 借用或构建单个文件的导入可达分析视图。
+    fn view_for(&mut self, path: &Path) -> Option<ProjectView> {
+        if !self.views.contains_key(path) {
+            let overlays = self.overlays();
+            let view = ProjectView::analyze(path, &overlays)?;
+            self.views.insert(path.to_path_buf(), view);
+        }
+        self.views.get(path).cloned()
+    }
+
+    // 借用或构建覆盖整个项目及未落盘模块的共享索引。
+    fn indexed_view(&mut self, path: &Path) -> Option<ProjectView> {
+        let overlays = self.overlays();
+        let root = ProjectView::root_for(path, &overlays);
+        if self.index.as_ref().is_none_or(|index| index.root() != root) {
+            self.index = ProjectView::index(path, &overlays);
+        }
+        self.index.as_ref().and_then(|index| index.for_path(path))
+    }
+
     // 对其他打开文件重算诊断，使未保存的定义文件即时影响导入者。
-    fn refreshed_diagnostics_except(&self, changed: &Uri) -> Vec<Notification> {
+    fn refreshed_diagnostics_except(&mut self, changed: &Uri) -> Vec<Notification> {
         let mut uris = self
             .documents
             .keys()
             .filter(|uri| *uri != changed)
+            .cloned()
             .collect::<Vec<_>>();
-        uris.sort_by_key(|uri| uri.as_str());
-        uris.into_iter().map(|uri| self.diagnostics(uri)).collect()
+        uris.sort_by_key(|uri| uri.as_str().to_owned());
+        uris.into_iter().map(|uri| self.diagnostics(&uri)).collect()
     }
 
     // 将文件 URI 映射为磁盘路径，不对打开文档执行磁盘读取。
@@ -118,18 +152,19 @@ impl LanguageServer {
     }
 
     // 为缓存中的完整文本生成语法、质量与跨文件诊断。
-    fn diagnostics(&self, uri: &Uri) -> Notification {
+    fn diagnostics(&mut self, uri: &Uri) -> Notification {
         let document = self
             .documents
             .get(uri)
-            .expect("diagnostics require an open document");
+            .expect("diagnostics require an open document")
+            .clone();
         let path = Self::path(uri).unwrap_or_else(|| PathBuf::from(uri.as_str()));
         let mut diagnostics = Linter::new()
             .lint_source(&path, &document.text)
             .diagnostics()
             .to_vec();
         if let Some(real_path) = Self::path(uri)
-            && let Some(view) = ProjectView::analyze(&real_path, &self.overlays())
+            && let Some(view) = self.view_for(&real_path)
         {
             for item in view.diagnostics_for(&real_path) {
                 if !diagnostics.iter().any(|existing| existing == &item) {
@@ -170,8 +205,8 @@ impl LanguageServer {
         )
     }
 
-    // 对打开的文档返回完整替换编辑而不操作磁盘。
-    fn request(&self, request: Request) -> Response {
+    // 对打开的文档返回补全、引用、跳转或格式化结果。
+    fn request(&mut self, request: Request) -> Response {
         if request.method == "textDocument/definition" {
             let params: GotoDefinitionParams = match serde_json::from_value(request.params) {
                 Ok(params) => params,
@@ -186,10 +221,51 @@ impl LanguageServer {
             let uri = &params.text_document_position_params.text_document.uri;
             let location = Self::path(uri).and_then(|path| {
                 self.documents.get(uri)?;
-                ProjectView::analyze(&path, &self.overlays())?
+                self.view_for(&path)?
                     .definition(params.text_document_position_params.position)
             });
             return Response::new_ok(request.id, location);
+        }
+        if request.method == "textDocument/completion" {
+            let params: CompletionParams = match serde_json::from_value(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return Response::new_err(
+                        request.id,
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        error.to_string(),
+                    );
+                }
+            };
+            let uri = &params.text_document_position.text_document.uri;
+            let items = Self::path(uri).and_then(|path| {
+                self.documents.get(uri)?;
+                Some(
+                    self.indexed_view(&path)?
+                        .completions(params.text_document_position.position),
+                )
+            });
+            return Response::new_ok(request.id, items);
+        }
+        if request.method == "textDocument/references" {
+            let params: ReferenceParams = match serde_json::from_value(request.params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return Response::new_err(
+                        request.id,
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        error.to_string(),
+                    );
+                }
+            };
+            let uri = &params.text_document_position.text_document.uri;
+            let locations = Self::path(uri).and_then(|path| {
+                self.documents.get(uri)?;
+                let view = self.indexed_view(&path)?;
+                let target = view.symbol_at(params.text_document_position.position)?;
+                Some(view.references(&target, params.context.include_declaration))
+            });
+            return Response::new_ok(request.id, locations);
         }
         if request.method != "textDocument/formatting" {
             return Response::new_err(
@@ -255,13 +331,18 @@ fn full_range(text: &str) -> Range {
     )
 }
 
-/// 在 stdin/stdout 上提供单文件诊断与格式化服务。
+/// 在 stdin/stdout 上提供项目诊断、格式化、跳转、补全与引用查找服务。
 pub fn serve() -> Result<(), Box<dyn Error>> {
     let (connection, threads) = Connection::stdio();
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         document_formatting_provider: Some(lsp_types::OneOf::Left(true)),
         definition_provider: Some(lsp_types::OneOf::Left(true)),
+        references_provider: Some(lsp_types::OneOf::Left(true)),
+        completion_provider: Some(CompletionOptions {
+            trigger_characters: Some(vec![":".into(), ">".into()]),
+            ..Default::default()
+        }),
         ..Default::default()
     };
     connection.initialize(serde_json::to_value(capabilities)?)?;
@@ -449,7 +530,7 @@ mod tests {
                 "options": { "tabSize": 4, "insertSpaces": true } }),
             )
         };
-        let unknown = server.request(request("textDocument/completion"));
+        let unknown = server.request(request("textDocument/unknown"));
         assert_eq!(unknown.response_result.unwrap_err().code, -32601);
         let unopened = server.request(request("textDocument/formatting"));
         assert_eq!(unopened.response_result.unwrap_err().code, -32602);

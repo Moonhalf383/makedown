@@ -202,6 +202,22 @@ impl ProjectAnalyzer {
         self.analyze_module_with_sources_and_modules(module, read_source, |_, _| {})
     }
 
+    // 扫描整个项目并使用编辑器的内存文件覆盖磁盘版本。
+    pub(crate) fn analyze_all_with_sources_and_modules(
+        &self,
+        mut read_source: impl FnMut(&Path) -> std::io::Result<String>,
+        mut inspect: impl FnMut(&Path, &ParsedModule),
+        extra_modules: impl IntoIterator<Item = ModulePath>,
+    ) -> std::io::Result<AnalysisResult> {
+        let mut state = AnalysisState::new(self, None);
+        let (mut modules, diagnostics) = self.discover_modules()?;
+        modules.extend(extra_modules);
+        state.pending = modules;
+        state.diagnostics.extend(diagnostics);
+        state.load_reachable_modules(&mut |_| Ok(()), &mut inspect, &mut read_source)?;
+        Ok(state.resolve())
+    }
+
     // 向编辑器提供分析过程中已解析的模块以定位目标声明。
     pub(crate) fn analyze_module_with_sources_and_modules(
         &self,
