@@ -25,18 +25,7 @@ LazyVim 初始化时会重建 `runtimepath`。如果把 `dofile` 放在 `require
 
 第二项结果的首个路径应当是本项目的 `nvim/syntax/mf.vim`；第三项在目标标题 `# ...` 所在行应显示 `mfTargetMarker`。
 
-在导入、目标依赖或公开声明的 `>` 行使用编辑器的 LSP 补全；可在 Neovim 配置中随 LspAttach 自动触发：
-
-```lua
-vim.api.nvim_create_autocmd("LspAttach", {
-  callback = function(event)
-    local client = vim.lsp.get_client_by_id(event.data.client_id)
-    vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
-  end,
-})
-```
-
-导入补全提供项目中的公开目标和模块路径（含 `crate::`、`self::`、`super::` 锚点与相对锚点下的候选），依赖补全提供本文件目标与导入别名，公开声明补全提供本文件目标。光标放在目标名称、导入路径或依赖上执行 `:lua vim.lsp.buf.references()` 可查看跨文件引用；`vim.lsp.buf.definition()` 跳转定义。补全不支持 `as` 后的别名命名建议。
+`nvim/lsp.lua` 已随 `LspAttach` 为 mkd 客户端自动开启补全（`>` 和 `:` 会自动触发，也可用 `<C-x><C-o>` 手动触发）。在导入、目标依赖或公开声明的 `>` 行：导入补全提供项目中的公开目标和模块路径（含 `crate::`、`self::`、`super::` 锚点与相对锚点下的候选），依赖补全提供本文件目标与导入别名，公开声明补全提供本文件目标。光标放在目标名称、导入路径或依赖上执行 `:lua vim.lsp.buf.references()` 可查看跨文件引用；`vim.lsp.buf.definition()` 跳转定义。补全不支持 `as` 后的别名命名建议。
 
 使用 `vim.lsp.buf.format()`（例如手动执行 `:lua vim.lsp.buf.format()`）对当前缓冲区请求格式化。服务器不会自己写磁盘，编辑器确认并应用修改后才会保存。
 
