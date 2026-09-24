@@ -44,7 +44,7 @@ fn binary_discovers_main_from_a_nested_directory() {
     let project = example("valid", "09-deep-directory");
     let result = run(
         &project.join("org/product/api"),
-        &["expose_service", "-o", artifact.to_str().unwrap()],
+        &["target", "expose_service", "-o", artifact.to_str().unwrap()],
     );
 
     assert!(result.status.success(), "{:?}", result);
@@ -68,6 +68,7 @@ fn binary_compiles_a_namespaced_target_with_an_explicit_root() {
     let result = run(
         &working_directory,
         &[
+            "target",
             "platform::services::identity::ready",
             "--root",
             root_file.to_str().unwrap(),
@@ -93,6 +94,7 @@ fn binary_builds_with_a_custom_template_from_the_working_directory() {
     let result = run(
         &working_directory,
         &[
+            "target",
             "expose_service",
             "--root",
             root.to_str().unwrap(),
@@ -119,6 +121,7 @@ fn binary_check_with_template_validates_rendering_without_writing() {
     let template = working_directory.join("plan.md");
     fs::write(&template, "{{ plan.root_target }}").unwrap();
     let args = [
+        "target",
         "greet",
         "--root",
         root.to_str().unwrap(),
@@ -141,7 +144,13 @@ fn binary_check_with_template_validates_rendering_without_writing() {
     assert!(stderr.contains("undefined value"), "{stderr}");
     let plain_check = run(
         &working_directory,
-        &["greet", "--root", root.to_str().unwrap(), "--check"],
+        &[
+            "target",
+            "greet",
+            "--root",
+            root.to_str().unwrap(),
+            "--check",
+        ],
     );
     assert!(plain_check.status.success(), "{plain_check:?}");
     fs::remove_dir_all(working_directory).unwrap();
@@ -160,7 +169,14 @@ fn binary_rejects_invalid_templates_without_overwriting_output() {
     fs::write(project.join("result.md"), "keep").unwrap();
     let result = run(
         &project,
-        &["build", "--template", "layout.md", "-o", "result.md"],
+        &[
+            "target",
+            "build",
+            "--template",
+            "layout.md",
+            "-o",
+            "result.md",
+        ],
     );
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("layout.md`:1:"));
@@ -171,7 +187,14 @@ fn binary_rejects_invalid_templates_without_overwriting_output() {
     fs::write(project.join("layout.md"), "{% include 'secret.md' %}").unwrap();
     let result = run(
         &project,
-        &["build", "--template", "layout.md", "-o", "result.md"],
+        &[
+            "target",
+            "build",
+            "--template",
+            "layout.md",
+            "-o",
+            "result.md",
+        ],
     );
     assert!(!result.status.success());
     assert_eq!(
@@ -180,7 +203,14 @@ fn binary_rejects_invalid_templates_without_overwriting_output() {
     );
     let missing = run(
         &project,
-        &["build", "--template", "missing.md", "-o", "result.md"],
+        &[
+            "target",
+            "build",
+            "--template",
+            "missing.md",
+            "-o",
+            "result.md",
+        ],
     );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("missing.md"));
@@ -208,13 +238,16 @@ fn binary_refuses_to_overwrite_compilation_inputs() {
     fs::write(project.join("layout.md"), "# {{ plan.root_target }}\n").unwrap();
     for file in ["main.mf", "shared.mf", "layout.md"] {
         let before = fs::read_to_string(project.join(file)).unwrap();
-        let result = run(&project, &["build", "--template", "layout.md", "-o", file]);
+        let result = run(
+            &project,
+            &["target", "build", "--template", "layout.md", "-o", file],
+        );
         assert!(!result.status.success(), "{file}: {result:?}");
         assert!(String::from_utf8_lossy(&result.stderr).contains("would overwrite"));
         assert_eq!(fs::read_to_string(project.join(file)).unwrap(), before);
     }
     let before = fs::read_to_string(project.join("shared.mf")).unwrap();
-    let no_template = run(&project, &["build", "-o", "shared.mf"]);
+    let no_template = run(&project, &["target", "build", "-o", "shared.mf"]);
     assert!(!no_template.status.success());
     assert_eq!(
         fs::read_to_string(project.join("shared.mf")).unwrap(),
@@ -231,7 +264,7 @@ fn init_and_named_profiles_build_reproducibly_from_nested_directory() {
     let initialized = run(&directory, &["init", "project"]);
     assert!(initialized.status.success(), "{initialized:?}");
     fs::create_dir_all(project.join("nested")).unwrap();
-    let default = run(&project.join("nested"), &["profile"]);
+    let default = run(&project.join("nested"), &["build"]);
     assert!(default.status.success(), "{default:?}");
     assert!(
         fs::read_to_string(project.join("dist/plan.md"))
@@ -244,7 +277,7 @@ fn init_and_named_profiles_build_reproducibly_from_nested_directory() {
     )
     .unwrap();
     fs::write(project.join("mkd.toml"), "version = 1\n[build]\ndefault = 'main'\n[build.main]\ntarget = 'start'\noutput = 'dist/plan.md'\n[build.guide]\ntarget = 'guide::write'\noutput = 'dist/guide.md'\n").unwrap();
-    let named = run(&project.join("nested"), &["profile", "guide"]);
+    let named = run(&project.join("nested"), &["build", "guide"]);
     assert!(named.status.success(), "{named:?}");
     assert!(
         fs::read_to_string(project.join("dist/guide.md"))
@@ -256,7 +289,7 @@ fn init_and_named_profiles_build_reproducibly_from_nested_directory() {
 
 // 验证配置模板与 CLI 覆盖选项、检查模式不写出制品。
 #[test]
-fn profile_uses_configured_template_and_check_respects_no_template() {
+fn build_uses_configured_template_and_check_respects_no_template() {
     let directory = temporary_directory();
     fs::write(
         directory.join("main.mf"),
@@ -265,11 +298,11 @@ fn profile_uses_configured_template_and_check_respects_no_template() {
     .unwrap();
     fs::write(directory.join("layout.md.j2"), "{{ plan.missing }}").unwrap();
     fs::write(directory.join("mkd.toml"), "version = 1\n[build]\ndefault = 'main'\n[build.main]\ntarget = 'start'\noutput = 'dist/plan.md'\ntemplate = 'layout.md.j2'\n").unwrap();
-    let checked = run(&directory, &["profile", "--check"]);
+    let checked = run(&directory, &["build", "--check"]);
     assert!(!checked.status.success());
     assert!(!directory.join("dist").exists());
     assert!(
-        run(&directory, &["profile", "--check", "--no-template"])
+        run(&directory, &["build", "--check", "--no-template"])
             .status
             .success()
     );
@@ -278,7 +311,7 @@ fn profile_uses_configured_template_and_check_respects_no_template() {
         "# 自定义：{{ plan.root_target }}\n",
     )
     .unwrap();
-    let built = run(&directory, &["profile"]);
+    let built = run(&directory, &["build"]);
     assert!(built.status.success(), "{built:?}");
     assert_eq!(
         fs::read_to_string(directory.join("dist/plan.md")).unwrap(),
@@ -292,7 +325,7 @@ fn profile_uses_configured_template_and_check_respects_no_template() {
     let override_template = run(
         &directory,
         &[
-            "profile",
+            "build",
             "--template",
             "alternate.md.j2",
             "-o",
@@ -306,7 +339,7 @@ fn profile_uses_configured_template_and_check_respects_no_template() {
     );
     let override_output = run(
         &directory,
-        &["profile", "-o", "custom/output.md", "--no-template"],
+        &["build", "-o", "custom/output.md", "--no-template"],
     );
     assert!(override_output.status.success(), "{override_output:?}");
     assert!(
@@ -317,21 +350,27 @@ fn profile_uses_configured_template_and_check_respects_no_template() {
     fs::remove_dir_all(directory).unwrap();
 }
 
-// 验证旧 Target 命令不读配置，并允许名为 build 的 Target。
+// 验证 target 子命令不读配置，并允许与构建子命令同名的 Target。
 #[test]
 fn direct_target_command_remains_independent_of_configuration() {
     let directory = temporary_directory();
     fs::write(
         directory.join("main.mf"),
-        "---\n# build\n- done\n---\n> build\n",
+        "---\n# build\n- done\n# target\n- done\n# profile\n- done\n---\n> build\n> target\n> profile\n",
     )
     .unwrap();
     fs::write(directory.join("mkd.toml"), "version = 9\n").unwrap();
-    let direct = run(&directory, &["build", "-o", "output/nested.md"]);
+    let direct = run(&directory, &["target", "build", "-o", "output/nested.md"]);
     assert!(direct.status.success(), "{direct:?}");
     assert!(directory.join("output/nested.md").exists());
-    assert!(!run(&directory, &["profile"]).status.success());
-    assert!(run(&directory, &["build", "--check"]).status.success());
+    assert!(!run(&directory, &["build"]).status.success());
+    for name in ["build", "target", "profile"] {
+        assert!(
+            run(&directory, &["target", name, "--check"])
+                .status
+                .success()
+        );
+    }
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -350,7 +389,7 @@ fn init_safely_completes_existing_project() {
     assert!(!directory.join("mkd.toml").exists());
     let init = run(&directory, &["init", "--target", "publish"]);
     assert!(init.status.success(), "{init:?}");
-    assert!(run(&directory, &["profile"]).status.success());
+    assert!(run(&directory, &["build"]).status.success());
     assert_eq!(
         fs::read_to_string(directory.join("main.mf")).unwrap(),
         source
@@ -365,7 +404,7 @@ fn init_safely_completes_existing_project() {
 
 // 验证配置的未知字段、无效默认配方和逃逸路径不会被忽略。
 #[test]
-fn profile_rejects_invalid_configuration_and_escaping_paths() {
+fn build_rejects_invalid_configuration_and_escaping_paths() {
     let directory = temporary_directory();
     fs::write(
         directory.join("main.mf"),
@@ -378,7 +417,7 @@ fn profile_rejects_invalid_configuration_and_escaping_paths() {
         "version = 1\n[build]\ndefault = 'main'\n[build.main]\ntarget = 'start'\noutput = 'dist/plan.md'\nunknown = 2\n",
     ] {
         fs::write(directory.join("mkd.toml"), config).unwrap();
-        let result = run(&directory, &["profile"]);
+        let result = run(&directory, &["build"]);
         assert!(!result.status.success(), "{result:?}");
         assert!(String::from_utf8_lossy(&result.stderr).contains("invalid config"));
     }
@@ -388,12 +427,12 @@ fn profile_rejects_invalid_configuration_and_escaping_paths() {
 
 // 验证配方即使命令行覆盖了输出，也不能覆盖源配置文件。
 #[test]
-fn profile_output_cannot_overwrite_mkd_toml() {
+fn build_output_cannot_overwrite_mkd_toml() {
     let directory = temporary_directory();
     let init = run(&directory, &["init"]);
     assert!(init.status.success(), "{init:?}");
     let config = fs::read_to_string(directory.join("mkd.toml")).unwrap();
-    let result = run(&directory, &["profile", "-o", "mkd.toml"]);
+    let result = run(&directory, &["build", "-o", "mkd.toml"]);
     assert!(!result.status.success());
     assert_eq!(
         fs::read_to_string(directory.join("mkd.toml")).unwrap(),
@@ -406,7 +445,7 @@ fn profile_output_cannot_overwrite_mkd_toml() {
 #[test]
 fn binary_check_reports_invalid_project_diagnostics() {
     let project = example("invalid", "10-dependency-cycle");
-    let result = run(&project, &["first", "--check"]);
+    let result = run(&project, &["target", "first", "--check"]);
 
     assert!(!result.status.success());
     let stderr = String::from_utf8(result.stderr).unwrap();
@@ -420,7 +459,7 @@ fn binary_check_reports_invalid_project_diagnostics() {
 #[test]
 fn binary_rejects_invalid_target_syntax() {
     let project = example("valid", "01-single-target");
-    let result = run(&project, &["bad::", "--check"]);
+    let result = run(&project, &["target", "bad::", "--check"]);
 
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).unwrap();
@@ -431,9 +470,15 @@ fn binary_rejects_invalid_target_syntax() {
 #[test]
 fn binary_color_mode_controls_ansi_sequences() {
     let project = example("valid", "01-single-target");
-    let plain = run(&project, &["greet", "--check"]);
-    let colored = run(&project, &["greet", "--check", "--color", "always"]);
-    let never = run(&project, &["greet", "--check", "--color", "never"]);
+    let plain = run(&project, &["target", "greet", "--check"]);
+    let colored = run(
+        &project,
+        &["target", "greet", "--check", "--color", "always"],
+    );
+    let never = run(
+        &project,
+        &["target", "greet", "--check", "--color", "never"],
+    );
 
     assert!(plain.status.success());
     assert!(colored.status.success());
@@ -506,9 +551,19 @@ fn binary_fmt_checks_and_writes_without_changing_invalid_files() {
 #[test]
 fn binary_requires_output_outside_check_mode() {
     let project = example("valid", "01-single-target");
-    let result = run(&project, &["greet"]);
+    let result = run(&project, &["target", "greet"]);
 
     assert_eq!(result.status.code(), Some(2));
     let stderr = String::from_utf8(result.stderr).unwrap();
     assert!(stderr.contains("--output <FILE>"));
+}
+
+// 验证裸 Target 与旧 profile 子命令不再被接受。
+#[test]
+fn binary_rejects_legacy_bare_target_and_profile_command() {
+    let project = example("valid", "01-single-target");
+    for arguments in [&["greet", "--check"][..], &["profile"][..]] {
+        let result = run(&project, arguments);
+        assert_eq!(result.status.code(), Some(2), "{result:?}");
+    }
 }

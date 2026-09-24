@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
+use clap::{Parser, Subcommand};
 
 use crate::compiler::{CompileError, Compiler, DefaultMarkdownRenderer, TemplateMarkdownRenderer};
 use crate::config::{ConfigError, ProjectConfig, project_path};
@@ -23,41 +23,11 @@ use crate::project::{AnalysisMode, ProjectAnalyzer};
 #[command(
     name = "mkd",
     version,
-    about = "Analyze and compile Markfile specifications",
-    args_conflicts_with_subcommands = true
+    about = "Analyze and compile Markfile specifications"
 )]
 struct Cli {
-    #[arg(
-        value_name = "TARGET",
-        help = "Target to check or compile (target or module::target)"
-    )]
-    target: Option<String>,
-
     #[command(subcommand)]
-    command: Option<Command>,
-
-    #[arg(
-        short,
-        long,
-        value_name = "FILE",
-        conflicts_with = "check",
-        help = "Write the compiled Markdown artifact to FILE"
-    )]
-    output: Option<PathBuf>,
-
-    #[arg(
-        long,
-        value_name = "FILE",
-        help = "Render the plan with a Markdown template"
-    )]
-    template: Option<PathBuf>,
-
-    #[arg(
-        long,
-        conflicts_with = "template",
-        help = "Ignore a configured template"
-    )]
-    no_template: bool,
+    command: Command,
 
     #[arg(
         long,
@@ -67,9 +37,6 @@ struct Cli {
     )]
     root: Option<PathBuf>,
 
-    #[arg(long, help = "Analyze the project without writing an artifact")]
-    check: bool,
-
     #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true, help = "Control ANSI colors in progress and diagnostic logs")]
     color: ColorChoice,
 }
@@ -77,17 +44,70 @@ struct Cli {
 // 定义独立于目标构建的维护命令。
 #[derive(Debug, Subcommand)]
 enum Command {
-    #[command(about = "Build a named project profile (default if omitted)")]
-    Profile {
-        #[arg(value_name = "NAME")]
-        name: Option<String>,
-        #[arg(short, long, value_name = "FILE", conflicts_with = "check")]
+    #[command(about = "Compile a Target directly without reading mkd.toml")]
+    Target {
+        #[arg(
+            value_name = "TARGET",
+            help = "Target to check or compile (target or module::target)"
+        )]
+        target: String,
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            required_unless_present = "check",
+            conflicts_with = "check",
+            help = "Write the compiled Markdown artifact to FILE"
+        )]
         output: Option<PathBuf>,
-        #[arg(long, value_name = "FILE", conflicts_with = "no_template")]
+        #[arg(
+            long,
+            value_name = "FILE",
+            conflicts_with = "no_template",
+            help = "Render the plan with a Markdown template"
+        )]
         template: Option<PathBuf>,
-        #[arg(long, conflicts_with = "template")]
+        #[arg(
+            long,
+            conflicts_with = "template",
+            help = "Use the default Markdown renderer"
+        )]
         no_template: bool,
-        #[arg(long)]
+        #[arg(long, help = "Analyze the project without writing an artifact")]
+        check: bool,
+    },
+    #[command(about = "Build a named project profile (default if omitted)")]
+    Build {
+        #[arg(
+            value_name = "PROFILE",
+            help = "Named build profile; defaults to [build].default"
+        )]
+        name: Option<String>,
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            conflicts_with = "check",
+            help = "Override the configured output path"
+        )]
+        output: Option<PathBuf>,
+        #[arg(
+            long,
+            value_name = "FILE",
+            conflicts_with = "no_template",
+            help = "Override the configured Markdown template"
+        )]
+        template: Option<PathBuf>,
+        #[arg(
+            long,
+            conflicts_with = "template",
+            help = "Ignore the configured template"
+        )]
+        no_template: bool,
+        #[arg(
+            long,
+            help = "Validate the profile and effective template without writing an artifact"
+        )]
         check: bool,
     },
     #[command(about = "Initialize main.mf and mkd.toml")]
@@ -221,9 +241,7 @@ impl fmt::Display for CliError {
                 }
                 Ok(())
             }
-            Self::InvalidArguments => {
-                formatter.write_str("provide a TARGET and either --check or -o FILE")
-            }
+            Self::InvalidArguments => formatter.write_str("invalid command arguments"),
             Self::FormatRejected => formatter.write_str("formatting rejected due to syntax errors"),
             Self::FormatChangedMeaning => {
                 formatter.write_str("formatting would change parsed meaning; file left untouched")
@@ -247,17 +265,6 @@ impl Error for CliError {}
 /// 解析进程参数并执行 mkd 命令。
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
-    if cli.command.is_none() && (cli.target.is_none() || (!cli.check && cli.output.is_none())) {
-        let message = if cli.target.is_none() {
-            "the following required arguments were not provided:\n  <TARGET>"
-        } else {
-            "the following required arguments were not provided:\n  --output <FILE>"
-        };
-        let _ = Cli::command()
-            .error(ErrorKind::MissingRequiredArgument, message)
-            .print();
-        return ExitCode::from(2);
-    }
     let terminal_allows_color =
         io::stderr().is_terminal() && env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
     let color = cli.color.enabled(terminal_allows_color);
@@ -287,107 +294,104 @@ fn execute(
     logger: &mut Logger<impl Write>,
 ) -> Result<(), CliError> {
     let started = Instant::now();
-    if let Some(Command::Init { directory, target }) = cli.command {
-        if cli.root.is_some() {
-            return Err(CliError::Init("--root cannot be used with init".into()));
+    match cli.command {
+        Command::Init { directory, target } => {
+            if cli.root.is_some() {
+                return Err(CliError::Init("--root cannot be used with init".into()));
+            }
+            execute_init(
+                directory.as_deref(),
+                target.as_deref(),
+                current_directory,
+                logger,
+                started,
+            )
         }
-        return execute_init(
-            directory.as_deref(),
-            target.as_deref(),
-            current_directory,
-            logger,
-            started,
-        );
-    }
-    if let Some(Command::Profile {
-        name,
-        output,
-        template,
-        no_template,
-        check,
-    }) = cli.command
-    {
-        let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
-        let config = ProjectConfig::load(&root_file)
-            .map_err(CliError::Config)?
-            .ok_or_else(|| {
+        Command::Build {
+            name,
+            output,
+            template,
+            no_template,
+            check,
+        } => {
+            let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
+            let config = ProjectConfig::load(&root_file)
+                .map_err(CliError::Config)?
+                .ok_or_else(|| {
+                    CliError::ProfileUnavailable(format!(
+                        "no mkd.toml beside `{}`; use `mkd init` or `mkd target TARGET`",
+                        root_file.display()
+                    ))
+                })?;
+            let (_profile_name, profile) = config.profile(name.as_deref()).ok_or_else(|| {
                 CliError::ProfileUnavailable(format!(
-                    "no mkd.toml beside `{}`; use `mkd init` or build a Target directly",
-                    root_file.display()
+                    "unknown or missing build profile `{}`",
+                    name.as_deref().unwrap_or("<default>")
                 ))
             })?;
-        let (_profile_name, profile) = config.profile(name.as_deref()).ok_or_else(|| {
-            CliError::ProfileUnavailable(format!(
-                "unknown or missing build profile `{}`",
-                name.as_deref().unwrap_or("<default>")
-            ))
-        })?;
-        let target = profile.target_id().map_err(CliError::Init)?;
-        let project_dir = root_file.parent().unwrap_or_else(|| Path::new("."));
-        let output = match output {
-            Some(path) => resolve_from(current_directory, &path),
-            None => {
-                project_path(project_dir, profile.output()).map_err(CliError::ProfileUnavailable)?
-            }
-        };
-        let template_path = if no_template {
-            None
-        } else if let Some(path) = template {
-            Some(resolve_from(current_directory, &path))
-        } else {
-            profile
-                .template()
-                .map(|path| project_path(project_dir, path))
-                .transpose()
-                .map_err(CliError::ProfileUnavailable)?
-        };
-        return compile_target(
-            &root_file,
+            let target = profile.target_id().map_err(CliError::Init)?;
+            let project_dir = root_file.parent().unwrap_or_else(|| Path::new("."));
+            let output = match output {
+                Some(path) => resolve_from(current_directory, &path),
+                None => project_path(project_dir, profile.output())
+                    .map_err(CliError::ProfileUnavailable)?,
+            };
+            let template_path = if no_template {
+                None
+            } else if let Some(path) = template {
+                Some(resolve_from(current_directory, &path))
+            } else {
+                profile
+                    .template()
+                    .map(|path| project_path(project_dir, path))
+                    .transpose()
+                    .map_err(CliError::ProfileUnavailable)?
+            };
+            compile_target(
+                &root_file,
+                target,
+                Some(output),
+                template_path,
+                check,
+                logger,
+                started,
+            )
+        }
+        Command::Target {
             target,
-            Some(output),
-            template_path,
+            output,
+            template,
+            no_template,
             check,
-            logger,
-            started,
-        );
-    }
-    if let Some(command) = cli.command {
-        return execute_maintenance(
+        } => {
+            let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
+            let target = parse_target_id(&target)?;
+            let output = output.map(|path| resolve_from(current_directory, &path));
+            let template_path = if no_template {
+                None
+            } else {
+                template
+                    .as_deref()
+                    .map(|path| resolve_from(current_directory, path))
+            };
+            compile_target(
+                &root_file,
+                target,
+                output,
+                template_path,
+                check,
+                logger,
+                started,
+            )
+        }
+        command => execute_maintenance(
             command,
             cli.root.as_deref(),
             current_directory,
             logger,
             started,
-        );
+        ),
     }
-    let target = cli.target.as_deref().ok_or(CliError::InvalidArguments)?;
-    if !cli.check && cli.output.is_none() {
-        return Err(CliError::OutputRequired);
-    }
-    let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
-    let target = parse_target_id(target)?;
-    if cli.no_template && cli.template.is_some() {
-        return Err(CliError::InvalidArguments);
-    }
-    let output = cli
-        .output
-        .map(|path| resolve_from(current_directory, &path));
-    let template_path = if cli.no_template {
-        None
-    } else {
-        cli.template
-            .as_deref()
-            .map(|path| resolve_from(current_directory, path))
-    };
-    compile_target(
-        &root_file,
-        target,
-        output,
-        template_path,
-        cli.check,
-        logger,
-        started,
-    )
 }
 
 // 分析指定目标并按可选模板检查或写出 Markdown。
@@ -760,7 +764,10 @@ fn execute_maintenance(
                 .finished("linted project", started.elapsed())
                 .map_err(CliError::WriteDiagnostics)?;
         }
-        Command::Lint { .. } | Command::Profile { .. } | Command::Init { .. } => {
+        Command::Lint { .. }
+        | Command::Target { .. }
+        | Command::Build { .. }
+        | Command::Init { .. } => {
             return Err(CliError::InvalidArguments);
         }
     }
@@ -873,12 +880,21 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    // 验证构建参数互斥且维护子命令不接受构建参数。
+    // 验证两种构建入口互不歧义且维护子命令不接受构建参数。
     #[test]
     fn clap_enforces_output_and_check_constraints() {
         assert!(Cli::try_parse_from(["mkd", "build"]).is_ok());
+        assert!(Cli::try_parse_from(["mkd", "target", "build"]).is_err());
+        assert!(Cli::try_parse_from(["mkd", "target", "build", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["mkd", "target", "build", "-o", "out.md"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["mkd", "target", "build", "--check", "-o", "out.md"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["mkd", "target", "profile", "--check"]).is_ok());
         assert!(Cli::try_parse_from(["mkd", "build", "--check", "-o", "out.md"]).is_err());
         assert!(Cli::try_parse_from(["mkd", "build", "--check"]).is_ok());
+        assert!(Cli::try_parse_from(["mkd", "profile"]).is_err());
+        assert!(Cli::try_parse_from(["mkd", "greet", "--check"]).is_err());
         assert!(Cli::try_parse_from(["mkd", "lint", "file.mf"]).is_ok());
         assert!(Cli::try_parse_from(["mkd", "lint", "--all"]).is_ok());
         assert!(Cli::try_parse_from(["mkd", "lint", "file.mf", "--all"]).is_err());
@@ -955,7 +971,7 @@ mod tests {
             "main.mf",
             "---\n# build\n构建目标。\n- 构建成功。\n---\n> build\n",
         )]);
-        let cli = Cli::try_parse_from(["mkd", "build", "--check"]).unwrap();
+        let cli = Cli::try_parse_from(["mkd", "target", "build", "--check"]).unwrap();
         let mut logs = Vec::new();
         let mut logger = Logger::new(&mut logs, false);
 
@@ -974,7 +990,7 @@ mod tests {
             "main.mf",
             "---\n# build\n构建目标。\n- 构建成功。\n---\n> build\n",
         )]);
-        let cli = Cli::try_parse_from(["mkd", "build", "-o", "output.md"]).unwrap();
+        let cli = Cli::try_parse_from(["mkd", "target", "build", "-o", "output.md"]).unwrap();
         let mut logs = Vec::new();
         let mut logger = Logger::new(&mut logs, false);
 
@@ -993,7 +1009,7 @@ mod tests {
     fn build_mode_refuses_to_overwrite_the_root_file() {
         let source = "---\n# build\n构建目标。\n- 构建成功。\n---\n> build\n";
         let root = fixture(&[("main.mf", source)]);
-        let cli = Cli::try_parse_from(["mkd", "build", "-o", "main.mf"]).unwrap();
+        let cli = Cli::try_parse_from(["mkd", "target", "build", "-o", "main.mf"]).unwrap();
         let mut logs = Vec::new();
         let mut logger = Logger::new(&mut logs, false);
 
@@ -1025,7 +1041,7 @@ mod tests {
             "main.mf",
             ">\n---\n# build\n构建目标。\n- 构建成功。\n---\n> build\n",
         )]);
-        let cli = Cli::try_parse_from(["mkd", "build", "--check"]).unwrap();
+        let cli = Cli::try_parse_from(["mkd", "target", "build", "--check"]).unwrap();
         let mut logs = Vec::new();
         let mut logger = Logger::new(&mut logs, false);
 
@@ -1045,7 +1061,7 @@ mod tests {
             "main.mf",
             "---\n# build\n- 规格。\n错误描述。\n---\n> build\n",
         )]);
-        let cli = Cli::try_parse_from(["mkd", "build", "--check"]).unwrap();
+        let cli = Cli::try_parse_from(["mkd", "target", "build", "--check"]).unwrap();
         let mut logs = Vec::new();
         let mut logger = Logger::new(&mut logs, false);
 

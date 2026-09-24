@@ -1,8 +1,41 @@
-# 项目配置与初始化
+# 从 Markfile 生成实施计划
 
-`mkd init [DIRECTORY]` 在当前目录（或指定目录）创建 `main.mf` 和 `mkd.toml`。新项目包含 `start` 目标、默认配方 `main` 和输出 `dist/plan.md`；可以立即运行 `mkd profile`。`--target NAME` 可以给新项目设置本地目标名称。目标目录不存在时自动创建；已有 `main.mf` 但没有 `mkd.toml` 时，必须提供 `--target TARGET`，工具会先分析目标并确认可编译，再生成配置。已有 `mkd.toml` 时不会覆盖，直接报错。
+Markfile 是扩展名为 `.mf` 的工作说明文件。文件里的一个目标（Target）描述一项要完成的工作，可以写明它依赖哪些工作，以及怎样判断工作已经完成。`mkd` 会读取目标及其依赖，生成按阶段排列的 Markdown 实施计划：先安排基础工作，再安排依赖这些工作的后续任务。同一阶段的目标之间没有依赖关系，可以由实施者并行安排。
 
-`mkd.toml` 只读取本次选中的入口 Markfile 所在目录的一份：默认入口是向上找到的最近 `main.mf`，也可用 `--root FILE` 显式指定。配置不会改变项目模块路径、lint/fmt 或 LSP 的规则。配置格式版本 `version = 1` 必填，未知字段、错误版本和无效路径会报错。
+第一次使用时，可以让 `mkd` 帮你创建一个项目。在准备存放项目的目录里运行：
+
+```sh
+mkd init
+mkd build
+```
+
+在当前目录创建项目时，第一条命令创建 `main.mf` 和 `mkd.toml`。`main.mf` 是项目的入口工作说明文件，`mkd.toml` 保存常用的构建设置。第二条命令读取设置，生成 `dist/plan.md`；打开这个文件就能看到实施计划。如果想让工具新建一个项目目录，可以改用以下步骤：
+
+```sh
+mkd init my-project
+cd my-project
+mkd build
+```
+
+## 目标和构建配方
+
+一个项目通常有多个目标。例如 `main.mf` 中可以有一个名为 `start` 的目标。`mkd target start -o plan.md` 会直接生成这个目标的实施计划，并写入 `plan.md`。这里的 `-o` 指定输出文件。检查内容是否能成功分析、暂时不生成文件时，可以运行 `mkd target start --check`。
+
+如果经常要生成同一份计划，可以把目标、输出文件以及可选的排版模板写进 `mkd.toml`。这组可重复使用的设置叫构建配方（build profile）。例如配方 `main` 可以指定目标 `start`，将计划写到 `dist/plan.md`。此时运行 `mkd build` 就会使用默认配方；运行 `mkd build main` 则明确指定名为 `main` 的配方。`mkd target` 按命令行给出的目标编译，不读取 `mkd.toml`，适合临时指定输出；`mkd build` 读取配方，适合重复生成固定文档。
+
+目标名来自 `.mf` 文件，配方名来自 `mkd.toml`。两者可以相同：要编译名为 `build` 的目标，写 `mkd target build -o plan.md`；要执行名为 `build` 的配方，写 `mkd build build`。
+
+## 项目根目录和初始化
+
+运行 `mkd build` 或 `mkd target` 时，工具默认从当前目录向上寻找最近的 `main.mf`，并以该文件所在目录作为项目根目录。例如从 `my-project/notes` 目录运行 `mkd build`，如果 `my-project/main.mf` 是最近的入口文件，就会使用 `my-project/mkd.toml`。若入口文件另有名字，可通过 `--root` 指定它。例如，在 `my-project` 目录里使用 `mkd build --root entry.mf`。构建配方仍从所选入口文件旁边的 `mkd.toml` 读取。
+
+运行 `mkd init` 时，新项目默认创建名为 `start` 的本地目标，以及名为 `main` 的默认配方。可以用 `mkd init --target launch` 给新目标指定名称，也可以用 `mkd init my-project --target launch` 在指定目录创建它。这里的“本地”表示目标就在新建的 `main.mf` 里。
+
+如果某个目录里已有 `main.mf`，但尚无 `mkd.toml`，先确认入口文件中确实有 `launch` 目标，再在该目录运行 `mkd init --target launch`。工具会检查该目标能否成功分析，为它创建配置，并保留原有的 `main.mf`。已有 `mkd.toml` 时，初始化会报错，以免覆盖配置。
+
+## 编写 mkd.toml
+
+假设项目中已有 `platform` 和 `content/guide` 等模块文件，并准备了 `templates/release.md.j2` 模板，就可以使用下面这份配置。它提供两份常用计划：`release` 是默认配方，`guide` 是另一份可单独构建的配方。只想先体验完整流程时，使用前面的 `mkd init` 即可，它会创建可以直接运行的简单配置。
 
 ```toml
 version = 1
@@ -20,17 +53,26 @@ target = "content::guide::publish"
 output = "dist/guide.md"
 ```
 
-每个 `[build.NAME]` 必须有 `target` 和 `output`，`template` 可选；若有配方，`[build] default` 必须引用其中之一。只含 `version = 1` 的配置也合法，但还不能运行 `mkd profile`。`default` 是 `[build]` 内的保留键，不要将其用作配方名称。每次只编译一个配方的入口目标；不同配方可引用同一目标但分别指定模板和输出。
+`version = 1` 声明配置格式版本。`[build]` 中的 `default` 指定不带配方名运行 `mkd build` 时使用哪一个配方。`[build.release]` 和 `[build.guide]` 分别保存两个配方，方括号中的后半部分就是配方名。每个配方需要一个 `target` 和一个 `output`；`template` 可以省略，省略后会使用内置的 Markdown 排版。配置了配方时，`default` 必须指向其中一个。`default` 用作设置名称，不能再作为配方名。
+
+`platform::launch` 表示 `platform` 模块文件中的 `launch` 目标；`content::guide::publish` 表示更深一层模块中的 `publish` 目标。模块可以理解为项目中的另一份 `.mf` 文件，用来分组保存目标。入口文件 `main.mf` 中的目标只需写本地名称，例如 `start`。文件组织和跨文件引用的实例可以从 [`examples/`](../examples/README.md) 开始查看。
+
+上述 `release` 配方会把文件写到项目目录内的 `dist/release.md`，并用 `templates/release.md.j2` 排版；`guide` 配方会使用内置排版，写到 `dist/guide.md`。这些文件路径以项目根目录为起点。配置中的路径只能指向项目内部，不能是绝对路径，也不能通过上一级路径或符号链接指向项目外部。`mkd` 会检查配置格式、目标名称和路径；只写 `version = 1` 也能得到有效的空配置，但要执行 `mkd build`，还需要配方。
+
+## 常用命令
+
+在上面的配置和项目结构下，可以运行：
 
 ```sh
-mkd profile                # 构建默认配方
-mkd profile guide          # 构建指定配方
-mkd profile --check        # 检查默认配方和生效模板，不写文件
-mkd profile guide -o /tmp/guide.md          # 临时覆盖输出
-mkd profile --template alternate.md.j2     # 临时覆盖模板
-mkd profile --no-template                   # 使用默认 Markdown 渲染器
+mkd build                         # 生成默认的 release 计划
+mkd build guide                   # 生成 guide 计划
+mkd build --check                 # 检查目标及配方中指定的模板，不生成文件
+mkd build guide -o guide-copy.md  # 临时改用另一个输出文件
+mkd build --no-template           # 使用内置 Markdown 排版
+mkd target platform::launch -o launch.md  # 不用配置，直接生成计划
+mkd target platform::launch --check       # 检查目标，不生成文件
 ```
 
-配置中的 `template`/`output` 必须是**项目目录内的相对文件路径**，禁止绝对路径、越过项目目录的 `..` 以及通过符号链接逃逸；它们以入口 Markfile 所在目录为基准。显式 CLI `-o`/`--template` 仍相对命令启动目录（或可给绝对路径）。构建时会创建缺失的输出父目录，检查模式不会写文件或创建目录。输出不能覆盖入口 Markfile、分析过的其他 Markfile、模板或 `mkd.toml`。
+`mkd build --template alternate.md.j2` 可在本次构建中改用另一个排版模板；`mkd target start --template alternate.md.j2 -o plan.md` 也可以直接指定模板。模板的写法见[自定义 Markdown 模板](templates.md)。命令行中的 `-o` 和 `--template` 接受绝对路径；写相对路径时，以运行命令时所在的目录为起点。配置文件中的 `output` 和 `template` 则只能写项目内部的相对路径。`--check` 只检查，不创建输出文件或目录；当前配方使用了模板时，还会尝试用实际计划渲染它。
 
-原有的 `mkd TARGET -o FILE` 和 `mkd TARGET --check` 保持独立，**不会读取 `mkd.toml`**；其中 `TARGET` 甚至可以名为 `build`。不打算使用配方时仍可直接构建，且 `lint`/`fmt` 不受构建配置约束。配置模板可用 `mkd profile --check` 验证；若要只检查项目而不使用模板，则用 `mkd profile --check --no-template`。
+生成计划时，工具会为输出文件创建所需的父目录。为了保护输入内容，输出不能覆盖入口 `.mf`、构建时读取的其他 `.mf`、正在使用的模板或 `mkd.toml`。检查单份文件可以使用 `mkd lint main.mf`，检查项目中的所有 Markfile 可以使用 `mkd lint --all`；格式化文件使用 `mkd fmt main.mf`。这些维护命令不需要构建配方。
