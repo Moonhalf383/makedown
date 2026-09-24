@@ -340,7 +340,9 @@ pub fn serve() -> Result<(), Box<dyn Error>> {
         definition_provider: Some(lsp_types::OneOf::Left(true)),
         references_provider: Some(lsp_types::OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
-            trigger_characters: Some(vec![":".into(), ">".into()]),
+            // 空格也是触发字符：Neovim 只在触发字符上自动补全，
+            // 否则 `> ` 之后无法再次弹出候选。
+            trigger_characters: Some(vec![" ".into(), ":".into(), ">".into()]),
             ..Default::default()
         }),
         ..Default::default()

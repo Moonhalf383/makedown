@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit, Location, Position, Range, TextEdit,
-    Uri,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, Location, MarkupContent,
+    MarkupKind, Position, Range, TextEdit, Uri,
 };
 use url::Url;
 
@@ -338,7 +338,7 @@ impl ProjectView {
         {
             return Vec::new();
         }
-        let mut candidates = Vec::<(String, CompletionItemKind)>::new();
+        let mut candidates = Vec::<Candidate>::new();
         match section {
             0 => {
                 let parent = self
@@ -352,7 +352,7 @@ impl ProjectView {
                     anchors.push(("super::", &parent[..parent.len() - 1]));
                 }
                 for (anchor, base) in anchors {
-                    candidates.push((anchor.to_owned(), CompletionItemKind::KEYWORD));
+                    candidates.push(Candidate::anchor(anchor.to_owned()));
                     for (namespace, (_, candidate)) in self.modules.iter() {
                         let Some(relative) = namespace.segments().strip_prefix(base) else {
                             continue;
@@ -363,7 +363,10 @@ impl ProjectView {
                             format!("{anchor}{}::", relative.join("::"))
                         };
                         if !relative.is_empty() {
-                            candidates.push((prefix.clone(), CompletionItemKind::MODULE));
+                            candidates.push(Candidate::module(
+                                prefix.clone(),
+                                Self::module_documentation(candidate),
+                            ));
                         }
                         for target in candidate.targets().iter().filter(|target| {
                             candidate
@@ -371,9 +374,9 @@ impl ProjectView {
                                 .iter()
                                 .any(|item| item.name() == target.name())
                         }) {
-                            candidates.push((
+                            candidates.push(Candidate::target(
                                 format!("{prefix}{}", target.name()),
-                                CompletionItemKind::REFERENCE,
+                                self.target_documentation(namespace, target.name()),
                             ));
                         }
                     }
@@ -381,7 +384,10 @@ impl ProjectView {
             }
             1 => {
                 for target in module.targets() {
-                    candidates.push((target.name().to_owned(), CompletionItemKind::REFERENCE));
+                    candidates.push(Candidate::target(
+                        target.name().to_owned(),
+                        self.target_documentation(&self.current, target.name()),
+                    ));
                 }
                 for include in module.includes() {
                     if let Some(name) = include.alias().or_else(|| {
@@ -392,13 +398,19 @@ impl ProjectView {
                             .last()
                             .map(String::as_str)
                     }) {
-                        candidates.push((name.to_owned(), CompletionItemKind::REFERENCE));
+                        let documentation = self
+                            .resolve_path(include.target())
+                            .and_then(|id| self.target_documentation(id.namespace(), id.name()));
+                        candidates.push(Candidate::target(name.to_owned(), documentation));
                     }
                 }
             }
             2 => {
                 for target in module.targets() {
-                    candidates.push((target.name().to_owned(), CompletionItemKind::REFERENCE));
+                    candidates.push(Candidate::target(
+                        target.name().to_owned(),
+                        self.target_documentation(&self.current, target.name()),
+                    ));
                 }
             }
             _ => return Vec::new(),
@@ -410,21 +422,60 @@ impl ProjectView {
             Position::new(position.line, first),
             Position::new(position.line, end),
         );
-        candidates.sort_by(|a, b| a.0.cmp(&b.0));
-        candidates.dedup_by(|a, b| a.0 == b.0);
+        candidates.sort_by(|a, b| (a.group, &a.label).cmp(&(b.group, &b.label)));
+        candidates.dedup_by(|a, b| a.label == b.label);
         candidates
             .into_iter()
-            .filter(|(name, _)| name.starts_with(current) && name != current)
-            .map(|(label, kind)| CompletionItem {
+            .filter(|candidate| candidate.label.starts_with(current) && candidate.label != current)
+            .map(|candidate| CompletionItem {
                 text_edit: Some(CompletionTextEdit::Edit(TextEdit::new(
                     range,
-                    label.clone(),
+                    candidate.label.clone(),
                 ))),
-                label,
-                kind: Some(kind),
+                label: candidate.label.clone(),
+                kind: Some(candidate.kind),
+                sort_text: Some(format!("{}{}", candidate.group, candidate.label)),
+                documentation: candidate.documentation.map(|value| {
+                    Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value,
+                    })
+                }),
                 ..Default::default()
             })
             .collect()
+    }
+
+    // 提取目标声明后到下一个目标或分区前的正文行作为预览文档。
+    fn target_documentation(&self, namespace: &ModulePath, name: &str) -> Option<String> {
+        let (file, module) = self.modules.get(namespace)?;
+        let target = module
+            .targets()
+            .iter()
+            .find(|target| target.name() == name)?;
+        let text = self.sources.get(file)?;
+        let mut body = Vec::new();
+        for line in text.lines().skip(target.line()) {
+            let line = line.trim_end_matches('\r');
+            if line.starts_with('#') || line.trim_end() == "---" {
+                break;
+            }
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                body.push(trimmed.to_owned());
+            }
+        }
+        (!body.is_empty()).then(|| body.join("\n"))
+    }
+
+    // 列出模块的公开目标作为模块路径候选的文档。
+    fn module_documentation(module: &ParsedModule) -> Option<String> {
+        let names = module
+            .public_targets()
+            .iter()
+            .map(|target| format!("- {}", target.name()))
+            .collect::<Vec<_>>();
+        (!names.is_empty()).then(|| format!("public targets:\n{}", names.join("\n")))
     }
 
     // 在完整项目索引中收集同一目标的全部有效引用。
@@ -609,6 +660,46 @@ impl ProjectView {
         }
         file.push(format!("{}.mf", module.segments().last()?));
         Some(file)
+    }
+}
+
+// 保存一个补全候选的标签、排序组、类型与可选文档。
+struct Candidate {
+    label: String,
+    kind: CompletionItemKind,
+    group: &'static str,
+    documentation: Option<String>,
+}
+
+impl Candidate {
+    // 创建 `crate::` 等路径锚点候选。
+    fn anchor(label: String) -> Self {
+        Self {
+            label,
+            kind: CompletionItemKind::KEYWORD,
+            group: "0",
+            documentation: None,
+        }
+    }
+
+    // 创建目标候选并携带其正文预览。
+    fn target(label: String, documentation: Option<String>) -> Self {
+        Self {
+            label,
+            kind: CompletionItemKind::REFERENCE,
+            group: "1",
+            documentation,
+        }
+    }
+
+    // 创建模块路径候选并携带公开目标列表。
+    fn module(label: String, documentation: Option<String>) -> Self {
+        Self {
+            label,
+            kind: CompletionItemKind::MODULE,
+            group: "2",
+            documentation,
+        }
     }
 }
 
@@ -820,7 +911,7 @@ mod tests {
         .unwrap();
         let view = ProjectView::index(&main, &HashMap::new()).unwrap();
 
-        let imports = labels(view.completions(Position::new(0, 2)));
+        let imports = labels(&view.completions(Position::new(0, 2)));
         assert!(imports.contains(&"crate::shared::ready".to_owned()));
         assert!(imports.contains(&"crate::".to_owned()));
         assert!(imports.contains(&"self::".to_owned()));
@@ -828,22 +919,64 @@ mod tests {
         assert!(imports.contains(&"self::build".to_owned()));
         assert!(!imports.iter().any(|label| label.ends_with("::internal")));
 
-        let narrowed = labels(view.completions(Position::new(0, 10)));
+        let narrowed = labels(&view.completions(Position::new(0, 10)));
         assert_eq!(
             narrowed,
             vec![
-                "crate::shared::".to_owned(),
                 "crate::shared::ready".to_owned(),
+                "crate::shared::".to_owned(),
             ]
         );
+        let narrowed_items = view.completions(Position::new(0, 10));
+        assert_eq!(
+            narrowed_items[0].sort_text.as_deref(),
+            Some("1crate::shared::ready")
+        );
+        assert_eq!(
+            narrowed_items[0].documentation,
+            Some(lsp_types::Documentation::MarkupContent(
+                lsp_types::MarkupContent {
+                    kind: lsp_types::MarkupKind::PlainText,
+                    value: "- done".to_owned(),
+                }
+            ))
+        );
+        assert_eq!(
+            narrowed_items[1].documentation,
+            Some(lsp_types::Documentation::MarkupContent(
+                lsp_types::MarkupContent {
+                    kind: lsp_types::MarkupKind::PlainText,
+                    value: "public targets:\n- ready".to_owned(),
+                }
+            ))
+        );
 
-        let dependencies = labels(view.completions(Position::new(3, 2)));
-        assert!(dependencies.contains(&"gate".to_owned()));
-        assert!(dependencies.contains(&"build".to_owned()));
-        assert!(dependencies.contains(&"hidden".to_owned()));
-        assert!(!dependencies.iter().any(|label| label.contains("ready")));
+        let dependencies = view.completions(Position::new(3, 2));
+        let dependency_labels = labels(&dependencies);
+        assert!(dependency_labels.contains(&"gate".to_owned()));
+        assert!(dependency_labels.contains(&"build".to_owned()));
+        assert!(dependency_labels.contains(&"hidden".to_owned()));
+        assert!(
+            !dependency_labels
+                .iter()
+                .any(|label| label.contains("ready"))
+        );
+        let gate = dependencies
+            .iter()
+            .find(|item| item.label == "gate")
+            .unwrap();
+        assert_eq!(gate.sort_text.as_deref(), Some("1gate"));
+        assert_eq!(
+            gate.documentation,
+            Some(lsp_types::Documentation::MarkupContent(
+                lsp_types::MarkupContent {
+                    kind: lsp_types::MarkupKind::PlainText,
+                    value: "- done".to_owned(),
+                }
+            ))
+        );
 
-        let public = labels(view.completions(Position::new(7, 2)));
+        let public = labels(&view.completions(Position::new(7, 2)));
         assert_eq!(public, vec!["build".to_owned(), "hidden".to_owned()]);
 
         assert!(view.completions(Position::new(1, 2)).is_empty());
@@ -868,10 +1001,10 @@ mod tests {
         let mut overlays = HashMap::new();
         overlays.insert(sibling, "---\n# ready\n- done\n---\n> ready\n".to_owned());
         let view = ProjectView::index(&nested, &overlays).unwrap();
-        let self_candidates = labels(view.completions(Position::new(0, 8)));
+        let self_candidates = labels(&view.completions(Position::new(0, 8)));
         assert!(self_candidates.contains(&"self::shared::ready".to_owned()));
         assert!(!self_candidates.contains(&"self::root_target".to_owned()));
-        let super_candidates = labels(view.completions(Position::new(0, 2)));
+        let super_candidates = labels(&view.completions(Position::new(0, 2)));
         assert!(super_candidates.contains(&"super::root_target".to_owned()));
         assert!(super_candidates.contains(&"crate::team::shared::ready".to_owned()));
         fs::remove_dir_all(root).unwrap();
@@ -898,7 +1031,7 @@ mod tests {
         assert_eq!(locations[1].range.start, Position::new(4, 2));
         assert_eq!(locations[1].range.end, Position::new(4, 9));
         let items = view.completions(Position::new(5, 4));
-        assert_eq!(labels(items.clone()), vec!["😀build".to_owned()]);
+        assert_eq!(labels(&items), vec!["😀build".to_owned()]);
         let CompletionTextEdit::Edit(edit) = items[0].text_edit.as_ref().unwrap() else {
             panic!("expected full-token replacement");
         };
@@ -909,8 +1042,8 @@ mod tests {
     }
 
     // 提取补全候选的标签列表。
-    fn labels(items: Vec<CompletionItem>) -> Vec<String> {
-        items.into_iter().map(|item| item.label).collect()
+    fn labels(items: &[CompletionItem]) -> Vec<String> {
+        items.iter().map(|item| item.label.clone()).collect()
     }
 
     // 验证引用查找覆盖导入、依赖、公开声明并尊重可见性。

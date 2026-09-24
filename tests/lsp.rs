@@ -208,7 +208,7 @@ fn server_completes_and_finds_references_after_unsaved_changes() {
     );
     assert_eq!(
         reply(1)["result"]["capabilities"]["completionProvider"]["triggerCharacters"],
-        json!([":", ">"])
+        json!([" ", ":", ">"])
     );
     assert!(
         messages
@@ -240,6 +240,16 @@ fn server_completes_and_finds_references_after_unsaved_changes() {
         ready["textEdit"]["range"]["end"],
         json!({"line":0,"character":22})
     );
+    assert_eq!(ready["documentation"]["value"], "- done");
+    let shared_module = items
+        .iter()
+        .find(|item| item["label"] == "crate::shared::")
+        .unwrap();
+    assert_eq!(
+        shared_module["documentation"]["value"],
+        "public targets:\n- ready"
+    );
+    assert!(ready["sortText"].as_str().unwrap() < shared_module["sortText"].as_str().unwrap());
     assert_eq!(reply(3)["result"], Value::Null);
     let locations = reply(5)["result"].as_array().unwrap();
     assert_eq!(locations.len(), 6);
