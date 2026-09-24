@@ -13,14 +13,30 @@ vim.lsp.config("mkd", {
 vim.lsp.enable("mkd")
 
 -- 为 mkd 客户端自动开启补全；Neovim 0.11+ 不再默认弹出 LSP 候选。
+local doc_group = vim.api.nvim_create_augroup("mkd-completion-doc", { clear = true })
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)
     local client = vim.lsp.get_client_by_id(event.data.client_id)
-    if client and client.name == "mkd" then
-      -- 预选首条候选使 CompleteChanged 立即触发，
-      -- 否则 noselect 下预览窗口永远不会显示候选文档。
-      vim.bo[event.buf].completeopt = "menuone,popup"
-      vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
+    if not client or client.name ~= "mkd" then
+      return
     end
+    vim.bo[event.buf].completeopt = "menuone,noselect,popup"
+    vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
+    -- 有些配置虽保留了 info 与 popup，却不会自动创建预览浮窗。
+    vim.api.nvim_clear_autocmds({ group = doc_group, buffer = event.buf })
+    vim.api.nvim_create_autocmd("CompleteChanged", {
+      group = doc_group,
+      buffer = event.buf,
+      callback = function()
+        local item = vim.v.event.completed_item or {}
+        if vim.tbl_get(item, "user_data", "nvim", "lsp", "client_id") ~= client.id then
+          return
+        end
+        local selected = vim.fn.complete_info({ "selected" }).selected
+        if selected >= 0 and item.info and item.info ~= "" then
+          vim.api.nvim__complete_set(selected, { info = item.info })
+        end
+      end,
+    })
   end,
 })
