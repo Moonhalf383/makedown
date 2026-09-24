@@ -1,0 +1,9 @@
+{# 场景：将单目标项目压缩为一页简报；适用 examples/valid/01-single-target。 -#}
+# 目标简报：{{ plan.root_target }}
+
+目标说明：{{ plan.stages[0].targets[0].description }}
+
+验收要求：
+{% for specification in plan.stages[0].targets[0].specifications %}
+- [ ] {{ specification }}
+{% endfor %}

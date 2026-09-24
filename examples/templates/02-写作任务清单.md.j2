@@ -1,0 +1,22 @@
+{# 场景：按依赖先后安排写作；适用 examples/valid/02-private-helper。 -#}
+# 写作任务清单：{{ plan.root_target }}
+
+先完成提纲，再撰写正文。请按阶段依次验收。
+{% for stage in plan.stages %}
+## 第 {{ stage.index }} 阶段
+{% for target in stage.targets %}
+### {{ target.name }}
+
+{{ target.description or '（暂无说明）' }}
+{% if target.dependencies %}
+开始之前，请确认以下目标已验收：{% for dependency in target.dependencies %}`{{ dependency }}`{% if not loop.last %}、{% endif %}{% endfor %}。
+{% endif %}
+
+验收清单：
+{% for specification in target.specifications %}
+- [ ] {{ specification }}
+{% else %}
+- [ ] 补充本目标的验收要求。
+{% endfor %}
+{% endfor %}
+{% endfor %}

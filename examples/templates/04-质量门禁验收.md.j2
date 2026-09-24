@@ -1,0 +1,39 @@
+{# 场景：追踪菱形依赖图中的直接前置条件和全部验收项；适用 examples/valid/08-diamond-release。 -#}
+# 交付质量门禁：{{ plan.root_target }}
+
+实施顺序由依赖图确定：共享前置目标只实施一次；若某阶段有多个目标，可并行推进。
+{% set ns = namespace(total_targets=0, total_checks=0) %}
+{% for stage in plan.stages %}
+## 阶段 {{ stage.index }}
+{% if stage.targets | length > 1 %}
+本阶段有 {{ stage.targets | length }} 项可并行工作。
+{% endif %}
+{% for target in stage.targets %}
+{% set ns.total_targets = ns.total_targets + 1 %}
+### 门禁：`{{ target.id }}`
+
+{% if target.dependencies %}
+直接前置条件：
+{% for dependency in target.dependencies %}
+- [ ] 已验收 `{{ dependency }}`
+{% endfor %}
+{% else %}
+无需等待前置目标。
+{% endif %}
+
+交付说明：{{ target.description or '（尚未提供说明）' }}
+
+验收证据：
+{% for specification in target.specifications %}
+{% set ns.total_checks = ns.total_checks + 1 %}
+- [ ] {{ specification }}
+{% else %}
+- [ ] 记录本目标无显式验收规格的原因。
+{% endfor %}
+{% endfor %}
+{% endfor %}
+## 汇总
+
+- 需要实施的目标：{{ ns.total_targets }} 个。
+- 已定义的验收规格：{{ ns.total_checks }} 条。
+- 所有门禁均通过后，方可交付 `{{ plan.root_target }}`。

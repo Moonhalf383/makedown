@@ -9,8 +9,9 @@ use std::time::Instant;
 
 use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
 
-use crate::compiler::{CompileError, Compiler, DefaultMarkdownRenderer};
-use crate::core::{ModulePath, ModulePathError, TargetId, TargetName};
+use crate::compiler::{CompileError, Compiler, DefaultMarkdownRenderer, TemplateMarkdownRenderer};
+use crate::config::{ConfigError, ProjectConfig, project_path};
+use crate::core::{ModulePath, ModulePathError, Project, TargetId, TargetName};
 use crate::formatter::{FormatError, Formatter};
 use crate::linter::Linter;
 use crate::logging::{ColorChoice, Logger};
@@ -46,6 +47,20 @@ struct Cli {
 
     #[arg(
         long,
+        value_name = "FILE",
+        help = "Render the plan with a Markdown template"
+    )]
+    template: Option<PathBuf>,
+
+    #[arg(
+        long,
+        conflicts_with = "template",
+        help = "Ignore a configured template"
+    )]
+    no_template: bool,
+
+    #[arg(
+        long,
         value_name = "MARKFILE",
         global = true,
         help = "Use MARKFILE as the project root instead of searching for main.mf"
@@ -62,6 +77,26 @@ struct Cli {
 // 定义独立于目标构建的维护命令。
 #[derive(Debug, Subcommand)]
 enum Command {
+    #[command(about = "Build a named project profile (default if omitted)")]
+    Profile {
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+        #[arg(short, long, value_name = "FILE", conflicts_with = "check")]
+        output: Option<PathBuf>,
+        #[arg(long, value_name = "FILE", conflicts_with = "no_template")]
+        template: Option<PathBuf>,
+        #[arg(long, conflicts_with = "template")]
+        no_template: bool,
+        #[arg(long)]
+        check: bool,
+    },
+    #[command(about = "Initialize main.mf and mkd.toml")]
+    Init {
+        #[arg(value_name = "DIRECTORY")]
+        directory: Option<PathBuf>,
+        #[arg(long, value_name = "TARGET")]
+        target: Option<String>,
+    },
     #[command(about = "Lint a Markfile or every Markfile in the project")]
     Lint {
         #[arg(
@@ -93,13 +128,29 @@ enum CliError {
     ProjectUnavailable,
     OutputRequired,
     OutputAliasesRoot(PathBuf),
+    OutputAliasesInput(PathBuf),
     Compilation(CompileError),
+    Config(ConfigError),
+    ProfileUnavailable(String),
+    Init(String),
+    Template {
+        path: PathBuf,
+        line: Option<usize>,
+        column: Option<usize>,
+        source: minijinja::Error,
+    },
     InvalidArguments,
     FormatRejected,
     FormatChangedMeaning,
     FormatMismatch(PathBuf),
-    ReadFile { path: PathBuf, source: io::Error },
-    WriteOutput { path: PathBuf, source: io::Error },
+    ReadFile {
+        path: PathBuf,
+        source: io::Error,
+    },
+    WriteOutput {
+        path: PathBuf,
+        source: io::Error,
+    },
     WriteDiagnostics(io::Error),
 }
 
@@ -143,7 +194,33 @@ impl fmt::Display for CliError {
                 "output path `{}` would overwrite the root Markfile",
                 path.display()
             ),
+            Self::OutputAliasesInput(path) => write!(
+                formatter,
+                "output path `{}` would overwrite a template or project Markfile",
+                path.display()
+            ),
             Self::Compilation(error) => write!(formatter, "compilation failed: {error}"),
+            Self::Config(error) => write!(formatter, "{error}"),
+            Self::ProfileUnavailable(message) | Self::Init(message) => formatter.write_str(message),
+            Self::Template {
+                path,
+                line,
+                column,
+                source,
+            } => {
+                write!(formatter, "template `{}`", path.display())?;
+                if let Some(line) = line {
+                    write!(formatter, ":{line}")?;
+                    if let Some(column) = column {
+                        write!(formatter, ":{column}")?;
+                    }
+                }
+                write!(formatter, ": {}", source.kind())?;
+                if let Some(detail) = source.detail() {
+                    write!(formatter, ": {detail}")?;
+                }
+                Ok(())
+            }
             Self::InvalidArguments => {
                 formatter.write_str("provide a TARGET and either --check or -o FILE")
             }
@@ -210,6 +287,70 @@ fn execute(
     logger: &mut Logger<impl Write>,
 ) -> Result<(), CliError> {
     let started = Instant::now();
+    if let Some(Command::Init { directory, target }) = cli.command {
+        if cli.root.is_some() {
+            return Err(CliError::Init("--root cannot be used with init".into()));
+        }
+        return execute_init(
+            directory.as_deref(),
+            target.as_deref(),
+            current_directory,
+            logger,
+            started,
+        );
+    }
+    if let Some(Command::Profile {
+        name,
+        output,
+        template,
+        no_template,
+        check,
+    }) = cli.command
+    {
+        let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
+        let config = ProjectConfig::load(&root_file)
+            .map_err(CliError::Config)?
+            .ok_or_else(|| {
+                CliError::ProfileUnavailable(format!(
+                    "no mkd.toml beside `{}`; use `mkd init` or build a Target directly",
+                    root_file.display()
+                ))
+            })?;
+        let (_profile_name, profile) = config.profile(name.as_deref()).ok_or_else(|| {
+            CliError::ProfileUnavailable(format!(
+                "unknown or missing build profile `{}`",
+                name.as_deref().unwrap_or("<default>")
+            ))
+        })?;
+        let target = profile.target_id().map_err(CliError::Init)?;
+        let project_dir = root_file.parent().unwrap_or_else(|| Path::new("."));
+        let output = match output {
+            Some(path) => resolve_from(current_directory, &path),
+            None => {
+                project_path(project_dir, profile.output()).map_err(CliError::ProfileUnavailable)?
+            }
+        };
+        let template_path = if no_template {
+            None
+        } else if let Some(path) = template {
+            Some(resolve_from(current_directory, &path))
+        } else {
+            profile
+                .template()
+                .map(|path| project_path(project_dir, path))
+                .transpose()
+                .map_err(CliError::ProfileUnavailable)?
+        };
+        return compile_target(
+            &root_file,
+            target,
+            Some(output),
+            template_path,
+            check,
+            logger,
+            started,
+        );
+    }
     if let Some(command) = cli.command {
         return execute_maintenance(
             command,
@@ -225,12 +366,46 @@ fn execute(
     }
     let root_file = resolve_root_file(cli.root.as_deref(), current_directory)?;
     let target = parse_target_id(target)?;
-    let mode = if cli.check {
+    if cli.no_template && cli.template.is_some() {
+        return Err(CliError::InvalidArguments);
+    }
+    let output = cli
+        .output
+        .map(|path| resolve_from(current_directory, &path));
+    let template_path = if cli.no_template {
+        None
+    } else {
+        cli.template
+            .as_deref()
+            .map(|path| resolve_from(current_directory, path))
+    };
+    compile_target(
+        &root_file,
+        target,
+        output,
+        template_path,
+        cli.check,
+        logger,
+        started,
+    )
+}
+
+// 分析指定目标并按可选模板检查或写出 Markdown。
+fn compile_target(
+    root_file: &Path,
+    target: TargetId,
+    output: Option<PathBuf>,
+    template_path: Option<PathBuf>,
+    check: bool,
+    logger: &mut Logger<impl Write>,
+    started: Instant,
+) -> Result<(), CliError> {
+    let mode = if check && template_path.is_none() {
         AnalysisMode::DryRun
     } else {
         AnalysisMode::Build
     };
-    let analysis = ProjectAnalyzer::new(&root_file, mode)
+    let analysis = ProjectAnalyzer::new(root_file, mode)
         .analyze_with_progress(target.clone(), |module| logger.parsing(module))
         .map_err(CliError::WriteDiagnostics)?;
     for diagnostic in analysis.diagnostics() {
@@ -242,7 +417,7 @@ fn execute(
         return Err(CliError::AnalysisFailed);
     }
 
-    if cli.check {
+    if check && template_path.is_none() {
         logger
             .finished(&format!("checked target `{target}`"), started.elapsed())
             .map_err(CliError::WriteDiagnostics)?;
@@ -255,18 +430,55 @@ fn execute(
     let plan = Compiler::new()
         .plan(&project, target.clone())
         .map_err(CliError::Compilation)?;
-    for stage in plan.stages() {
-        for planned_target in stage.targets() {
-            logger
-                .compiling(planned_target.id())
-                .map_err(CliError::WriteDiagnostics)?;
+    if !check {
+        for stage in plan.stages() {
+            for planned_target in stage.targets() {
+                logger
+                    .compiling(planned_target.id())
+                    .map_err(CliError::WriteDiagnostics)?;
+            }
         }
     }
-    let markdown = DefaultMarkdownRenderer::new().render(&plan);
-    let output = cli.output.ok_or(CliError::OutputRequired)?;
-    let output = resolve_from(current_directory, &output);
-    if paths_alias(&output, &root_file) {
+    let markdown = if let Some(path) = &template_path {
+        let source = fs::read_to_string(path).map_err(|source| CliError::ReadFile {
+            path: path.clone(),
+            source,
+        })?;
+        TemplateMarkdownRenderer::new()
+            .render(&source, &plan)
+            .map_err(|error| template_error(path, &source, error))?
+    } else {
+        DefaultMarkdownRenderer::new().render(&plan)
+    };
+    if check {
+        logger
+            .finished(
+                &format!("checked target `{target}` and template"),
+                started.elapsed(),
+            )
+            .map_err(CliError::WriteDiagnostics)?;
+        return Ok(());
+    }
+    let output = output.ok_or(CliError::OutputRequired)?;
+    // 缺失的父目录会使 canonicalize 失败，先建目录再判断真实路径别名。
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|source| CliError::WriteOutput {
+            path: output.clone(),
+            source,
+        })?;
+    }
+    if paths_alias(&output, root_file) {
         return Err(CliError::OutputAliasesRoot(output));
+    }
+    if template_path
+        .as_ref()
+        .is_some_and(|path| paths_alias(&output, path))
+        || project_input_files(root_file, &project)
+            .iter()
+            .any(|path| paths_alias(&output, path))
+        || paths_alias(&output, &root_file.with_file_name("mkd.toml"))
+    {
+        return Err(CliError::OutputAliasesInput(output));
     }
     fs::write(&output, markdown).map_err(|source| CliError::WriteOutput {
         path: output.clone(),
@@ -279,6 +491,168 @@ fn execute(
         )
         .map_err(CliError::WriteDiagnostics)?;
     Ok(())
+}
+
+// 根据目录中已有文件安全初始化可构建项目。
+fn execute_init(
+    directory: Option<&Path>,
+    target: Option<&str>,
+    current_directory: &Path,
+    logger: &mut Logger<impl Write>,
+    started: Instant,
+) -> Result<(), CliError> {
+    let directory = directory
+        .map(|path| resolve_from(current_directory, path))
+        .unwrap_or_else(|| current_directory.to_path_buf());
+    let root_file = directory.join("main.mf");
+    let config_file = directory.join("mkd.toml");
+    let has_root = root_file.exists();
+    let has_config = config_file.exists();
+    if has_config {
+        return Err(CliError::Init(format!(
+            "`{}` already exists; init will not overwrite existing configuration",
+            config_file.display()
+        )));
+    }
+    let target = match (has_root, target) {
+        (true, None) => {
+            return Err(CliError::Init(
+                "main.mf already exists; pass --target TARGET to create its build profile".into(),
+            ));
+        }
+        (true, Some(name)) => {
+            let target = parse_target_id(name)?;
+            let analysis =
+                ProjectAnalyzer::new(&root_file, AnalysisMode::Build).analyze(target.clone());
+            if analysis.has_errors() {
+                return Err(CliError::Init(format!(
+                    "cannot initialize: target `{target}` in `{}` is not buildable: {}",
+                    root_file.display(),
+                    analysis
+                        .diagnostics()
+                        .iter()
+                        .filter(|item| item.severity() == crate::parser::DiagnosticSeverity::Error)
+                        .map(|item| item.message().to_owned())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                )));
+            }
+            target
+        }
+        (false, Some(name)) => {
+            let target = parse_target_id(name)?;
+            if !target.namespace().is_root() {
+                return Err(CliError::Init(
+                    "new projects require a local --target name".into(),
+                ));
+            }
+            target
+        }
+        (false, None) => TargetId::new(
+            ModulePath::root(),
+            TargetName::parse("start").expect("static target name"),
+        ),
+    };
+    let config = format!(
+        "version = 1\n\n[build]\ndefault = \"main\"\n\n[build.main]\ntarget = {}\noutput = \"dist/plan.md\"\n",
+        toml::Value::String(target.to_string())
+    );
+    let markfile = format!(
+        "---\n# {}\n描述要完成的工作。\n- 明确一条可核验的验收规格。\n---\n> {}\n",
+        target.name(),
+        target.name()
+    );
+    fs::create_dir_all(&directory).map_err(|source| CliError::WriteOutput {
+        path: directory.clone(),
+        source,
+    })?;
+    if !has_root {
+        use std::io::Write as _;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&root_file)
+            .map_err(|source| CliError::WriteOutput {
+                path: root_file.clone(),
+                source,
+            })?;
+        if let Err(source) = file.write_all(markfile.as_bytes()) {
+            let _ = fs::remove_file(&root_file);
+            return Err(CliError::WriteOutput {
+                path: root_file,
+                source,
+            });
+        }
+    }
+    let result = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&config_file);
+    let mut file = match result {
+        Ok(file) => file,
+        Err(source) => {
+            if !has_root {
+                let _ = fs::remove_file(&root_file);
+            }
+            return Err(CliError::WriteOutput {
+                path: config_file,
+                source,
+            });
+        }
+    };
+    if let Err(source) = file.write_all(config.as_bytes()) {
+        let _ = fs::remove_file(&config_file);
+        if !has_root {
+            let _ = fs::remove_file(&root_file);
+        }
+        return Err(CliError::WriteOutput {
+            path: config_file,
+            source,
+        });
+    }
+    logger
+        .finished(
+            &format!("initialized `{}`", directory.display()),
+            started.elapsed(),
+        )
+        .map_err(CliError::WriteDiagnostics)?;
+    Ok(())
+}
+
+// 将模板错误映射为输入文件中的行列位置。
+fn template_error(path: &Path, source: &str, error: minijinja::Error) -> CliError {
+    let column = error.range().and_then(|range| {
+        let prefix = source.get(..range.start)?;
+        Some(prefix.rsplit('\n').next()?.chars().count() + 1)
+    });
+    CliError::Template {
+        path: path.to_path_buf(),
+        line: error.line(),
+        column,
+        source: error,
+    }
+}
+
+// 枚举分析生成的项目所包含的所有 Markfile 输入路径。
+fn project_input_files(root_file: &Path, project: &Project) -> Vec<PathBuf> {
+    project
+        .modules()
+        .map(|module| {
+            if module.namespace().is_root() {
+                return root_file.to_path_buf();
+            }
+            let mut path = root_file
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .to_path_buf();
+            let segments = module.namespace().segments();
+            for segment in &segments[..segments.len() - 1] {
+                path.push(segment);
+            }
+            path.push(format!("{}.mf", segments.last().unwrap()));
+            path
+        })
+        .collect()
 }
 
 // 执行文件维护命令并复用项目诊断日志。
@@ -386,7 +760,9 @@ fn execute_maintenance(
                 .finished("linted project", started.elapsed())
                 .map_err(CliError::WriteDiagnostics)?;
         }
-        Command::Lint { .. } => return Err(CliError::InvalidArguments),
+        Command::Lint { .. } | Command::Profile { .. } | Command::Init { .. } => {
+            return Err(CliError::InvalidArguments);
+        }
     }
     Ok(())
 }
@@ -446,10 +822,22 @@ fn resolve_from(current_directory: &Path, path: &Path) -> PathBuf {
 
 // 尽可能规范化路径后判断两条路径是否指向同一文件。
 fn paths_alias(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
+    if left == right {
+        return true;
     }
+    if let (Ok(left), Ok(right)) = (left.canonicalize(), right.canonicalize())
+        && left == right
+    {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(left), Ok(right)) = (fs::metadata(left), fs::metadata(right)) {
+            return left.dev() == right.dev() && left.ino() == right.ino();
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -613,6 +1001,20 @@ mod tests {
 
         assert!(matches!(error, CliError::OutputAliasesRoot(_)));
         assert_eq!(fs::read_to_string(root.join("main.mf")).unwrap(), source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // 验证保护输入文件时能识别与模板或 Markfile 共用 inode 的硬链接。
+    #[cfg(unix)]
+    #[test]
+    fn paths_alias_recognizes_hard_links() {
+        let root = fixture(&[("main.mf", "---\n# build\n---\n> build\n")]);
+        std::fs::hard_link(root.join("main.mf"), root.join("artifact.md")).unwrap();
+
+        assert!(paths_alias(
+            &root.join("artifact.md"),
+            &root.join("main.mf")
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 

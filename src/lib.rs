@@ -2,6 +2,8 @@
 pub mod cli;
 /// 提供规格制品编译能力。
 pub mod compiler;
+/// 提供项目构建配方的加载与校验。
+pub mod config;
 /// 定义已解析项目的核心领域模型。
 pub mod core;
 /// 提供保留规格内容的 Markfile 格式化能力。

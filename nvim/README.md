@@ -25,9 +25,21 @@ LazyVim 初始化时会重建 `runtimepath`。如果把 `dofile` 放在 `require
 
 第二项结果的首个路径应当是本项目的 `nvim/syntax/mf.vim`；第三项在目标标题 `# ...` 所在行应显示 `mfTargetMarker`。
 
-`nvim/lsp.lua` 已随 `LspAttach` 为 mkd 客户端自动开启补全（`>`、`:` 和空格会自动触发，也可用 `<C-x><C-o>` 手动触发；Neovim 的自动补全只在触发字符上发起，加入空格后 `> ` 之后才能继续弹出候选）。mkd 缓冲区使用 `menuone,noselect,popup`：弹出时不会擅自选中或插入第一项；用 `<C-n>`/`<C-p>` 选中候选后，其文档才在旁边显示。部分 Neovim 配置不会自动创建此预览浮窗，`lsp.lua` 会在选中项变化时主动更新它；使用 Noice 外部补全菜单时，预览会按菜单的实际位置放在其侧边，避免被菜单遮挡。在导入、目标依赖或公开声明的 `>` 行：导入补全按「锚点（`crate::`、`self::`、`super::`）→ 公开目标 → 模块路径」排序，依赖补全提供本文件目标与导入别名，公开声明补全提供本文件目标；目标候选的预览窗口显示该 Target 的正文（描述、依赖与规格行），模块路径候选列出其公开目标。光标放在目标名称、导入路径或依赖上执行 `:lua vim.lsp.buf.references()` 可查看跨文件引用；`vim.lsp.buf.definition()` 跳转定义。补全不支持 `as` 后的别名命名建议。
+`nvim/lsp.lua` 已随 `LspAttach` 为 mkd 客户端自动开启补全（`>`、`:` 和空格会自动触发，也可用 `<C-x><C-o>` 手动触发；Neovim 的自动补全只在触发字符上发起，加入空格后 `>` 之后才能继续弹出候选）。mkd 缓冲区使用 `menuone,noselect,popup`：弹出时不会擅自选中或插入第一项；用 `<C-n>`/`<C-p>` 选中候选后，其文档才在旁边显示。部分 Neovim 配置不会自动创建此预览浮窗，`lsp.lua` 会在选中项变化时主动更新它；使用 Noice 外部补全菜单时，预览会按菜单的实际位置放在其侧边，避免被菜单遮挡。在导入、目标依赖或公开声明的 `>` 行：导入补全按「锚点（`crate::`、`self::`、`super::`）→ 公开目标 → 模块路径」排序，依赖补全提供本文件目标与导入别名，公开声明补全提供本文件目标；目标候选的预览窗口显示该 Target 的正文（描述、依赖与规格行），模块路径候选列出其公开目标。光标放在目标名称、导入路径或依赖上执行 `:lua vim.lsp.buf.references()` 可查看跨文件引用；`vim.lsp.buf.definition()` 跳转定义。补全不支持 `as` 后的别名命名建议。
 
-使用 `vim.lsp.buf.format()`（例如手动执行 `:lua vim.lsp.buf.format()`）对当前缓冲区请求格式化。服务器不会自己写磁盘，编辑器确认并应用修改后才会保存。
+使用 `vim.lsp.buf.format()`（例如手动执行 `:lua vim.lsp.buf.format()`）对当前 `.mf` 缓冲区请求格式化。服务器不会自己写磁盘，编辑器确认并应用修改后才会保存。
+
+## Markdown 模板（`.md.j2`）
+
+仅 `*.md.j2` 被识别为 `mkd_template`，普通 `.j2` 文件不接管。`nvim/syntax/mkd_template.vim` 在 Markdown 标题等语法上叠加 MiniJinja 插值、控制语句、注释、变量和过滤器高亮；独立加载本项目 `nvim` runtimepath 即可使用。打开 `examples/templates/02-写作任务清单.md.j2` 后可运行：
+
+```vim
+:set filetype?
+:lua print(vim.fn.synIDattr(vim.fn.synID(2, 1, 1), "name"))
+:lua print(vim.fn.synIDattr(vim.fn.synID(5, 1, 1), "name"))
+```
+
+两处应分别显示 `markdownH1Delimiter` 和 `mkdTemplateStatement`。`mkd-lsp` 对打开或未保存的模板检查 MiniJinja 语法（`T001`）和字面形式的未知 `plan.<字段>`（`T002`）；在标签内补全 `plan.`、`stage.`、`target.` 的公开字段，输入 `.` 自动触发，也可手动 `<C-x><C-o>`。它**不**把模板当 Markfile 解析，不提供模板格式化、跳转定义或引用查找；不绑定具体 Target，不执行模板，因此 `stage`/`target` 别名及数据相关错误请使用 `mkd TARGET --check --template FILE` 验证。详情参见 [`docs/templates.md`](../docs/templates.md)。
 
 ## 范围与后续架构
 
@@ -36,5 +48,6 @@ LazyVim 初始化时会重建 `runtimepath`。如果把 `dofile` 放在 `require
 - `src/lsp/workspace.rs`：按当前 `.mf` 向上找到最近的 `main.mf`；诊断和定义跳转分析导入可达图，补全与引用查找索引项目内全部模块（包括未被导入的模块和未落盘的打开文件）。打开文档优先使用未保存内容，其他模块回退磁盘；引用按解析后的目标身份匹配，包括导入、依赖与公开声明。
 - `src/parser.rs`、`src/linter.rs`、`src/formatter.rs`、`src/project.rs`：与 CLI 共享解析、静态检查、格式化及跨模块分析规则；LSP 不会将编辑器内容写入磁盘。
 - `nvim/ftdetect/mf.vim`、`nvim/syntax/mf.vim`：识别文件类型并高亮分隔线、目标、导入/依赖、锚点、别名和规格。
+- `nvim/ftdetect/mkd_template.vim`、`nvim/syntax/mkd_template.vim`：识别 Markdown 模板并在 Markdown 语法上叠加模板高亮。
 
 诊断仍分析**打开文件的导入可达图**，不是 `mkd lint --all` 的全项目扫描；直接缺失的模块会在引用文件的导入行提示。依赖模块有独立错误时，打开该模块可查看其诊断。补全和引用使用按项目根复用的全项目索引；打开文档内容变化或关闭时清空缓存并在下次请求重建。磁盘文件在 LSP 外部变化时暂不主动失效，大型项目也暂未实现增量索引。重命名尚未实现。高亮采用轻量正则，可能把描述中行首的结构标记当作高亮标记；诊断仍以解析器为准。

@@ -1,0 +1,36 @@
+{# 场景：多级流水线按阶段交接；适用 examples/valid/06-long-pipeline。 -#}
+# 数据流水线交接手册
+
+交付目标：`{{ plan.root_target }}`；共 {{ plan.stages | length }} 个阶段。严格按阶段推进，每一阶段验收后再开始下一阶段。
+
+## 阶段目录
+
+| 阶段 | 本阶段目标 | 工作方式 |
+| ---: | --- | --- |
+{%- for stage in plan.stages %}
+| {{ stage.index }} | {% for target in stage.targets %}`{{ target.id }}`{% if not loop.last %}、{% endif %}{% endfor %} | {% if stage.targets | length > 1 %}可并行{% else %}顺序交接{% endif %} |
+{%- endfor %}
+
+## 交接记录
+{% for stage in plan.stages %}
+### 阶段 {{ stage.index }}
+{% for target in stage.targets %}
+#### `{{ target.id }}`
+
+任务说明：{{ target.description or '（暂无说明）' }}
+{% if target.dependencies %}
+输入来自：{% for dependency in target.dependencies %}`{{ dependency }}`{% if not loop.last %}、{% endif %}{% endfor %}。
+{% else %}
+这是无需前置目标的起点。
+{% endif %}
+
+完成标准：
+{% for specification in target.specifications %}
+- [ ] {{ specification }}
+{% else %}
+- [ ] 请补充可核验的完成标准。
+{% endfor %}
+
+交接负责人：________  验收日期：________
+{% endfor %}
+{% endfor %}

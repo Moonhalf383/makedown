@@ -13,11 +13,13 @@ use lsp_types::{
     TextEdit, Uri,
 };
 
+mod template;
 mod workspace;
 
 use crate::formatter::{FormatError, Formatter};
 use crate::linter::Linter;
 use crate::parser::DiagnosticSeverity as MarkfileSeverity;
+use template::is_template_path;
 use workspace::ProjectView;
 
 // 保存编辑器中的未落盘内容与最新文档版本。
@@ -159,6 +161,16 @@ impl LanguageServer {
             .expect("diagnostics require an open document")
             .clone();
         let path = Self::path(uri).unwrap_or_else(|| PathBuf::from(uri.as_str()));
+        if is_template_path(&path) {
+            return Notification::new(
+                "textDocument/publishDiagnostics".into(),
+                PublishDiagnosticsParams {
+                    uri: uri.clone(),
+                    diagnostics: template::diagnostics(&document.text),
+                    version: Some(document.version),
+                },
+            );
+        }
         let mut diagnostics = Linter::new()
             .lint_source(&path, &document.text)
             .diagnostics()
@@ -219,6 +231,9 @@ impl LanguageServer {
                 }
             };
             let uri = &params.text_document_position_params.text_document.uri;
+            if Self::path(uri).as_deref().is_some_and(is_template_path) {
+                return Response::new_ok(request.id, Option::<lsp_types::Location>::None);
+            }
             let location = Self::path(uri).and_then(|path| {
                 self.documents.get(uri)?;
                 self.view_for(&path)?
@@ -238,6 +253,12 @@ impl LanguageServer {
                 }
             };
             let uri = &params.text_document_position.text_document.uri;
+            if Self::path(uri).as_deref().is_some_and(is_template_path) {
+                let items = self.documents.get(uri).map(|document| {
+                    template::completions(&document.text, params.text_document_position.position)
+                });
+                return Response::new_ok(request.id, items);
+            }
             let items = Self::path(uri).and_then(|path| {
                 self.documents.get(uri)?;
                 Some(
@@ -259,6 +280,9 @@ impl LanguageServer {
                 }
             };
             let uri = &params.text_document_position.text_document.uri;
+            if Self::path(uri).as_deref().is_some_and(is_template_path) {
+                return Response::new_ok(request.id, Option::<Vec<lsp_types::Location>>::None);
+            }
             let locations = Self::path(uri).and_then(|path| {
                 self.documents.get(uri)?;
                 let view = self.indexed_view(&path)?;
@@ -284,6 +308,16 @@ impl LanguageServer {
                 );
             }
         };
+        if Self::path(&params.text_document.uri)
+            .as_deref()
+            .is_some_and(is_template_path)
+        {
+            return Response::new_err(
+                request.id,
+                lsp_server::ErrorCode::MethodNotFound as i32,
+                "template formatting is not supported".into(),
+            );
+        }
         let Some(document) = self.documents.get(&params.text_document.uri) else {
             return Response::new_err(
                 request.id,
@@ -342,7 +376,7 @@ pub fn serve() -> Result<(), Box<dyn Error>> {
         completion_provider: Some(CompletionOptions {
             // 空格也是触发字符：Neovim 只在触发字符上自动补全，
             // 否则 `> ` 之后无法再次弹出候选。
-            trigger_characters: Some(vec![" ".into(), ":".into(), ">".into()]),
+            trigger_characters: Some(vec![" ".into(), ":".into(), ">".into(), ".".into()]),
             ..Default::default()
         }),
         ..Default::default()

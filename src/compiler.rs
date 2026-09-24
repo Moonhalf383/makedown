@@ -3,6 +3,8 @@ use std::error::Error;
 use std::fmt;
 
 use crate::core::{Project, TargetId};
+use minijinja::{AutoEscape, Environment, UndefinedBehavior, context};
+use serde_json::{Value, json};
 
 /// 保存一个目标在编译计划中所需的稳定数据。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -221,6 +223,52 @@ impl DefaultMarkdownRenderer {
         }
 
         output
+    }
+}
+
+/// 将只读编译计划渲染为自定义 Markdown 模板。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TemplateMarkdownRenderer;
+
+impl TemplateMarkdownRenderer {
+    /// 创建单文件 Markdown 模板渲染器。
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// 使用给定模板渲染计划，拒绝未知字段和无效表达式。
+    pub fn render(&self, source: &str, plan: &CompilationPlan) -> Result<String, minijinja::Error> {
+        let mut environment = Environment::new();
+        environment.set_auto_escape_callback(|_| AutoEscape::None);
+        environment.set_undefined_behavior(UndefinedBehavior::Strict);
+        environment.set_fuel(Some(1_000_000));
+        environment.set_recursion_limit(64);
+        environment.add_template("plan.md", source)?;
+        let template = environment.get_template("plan.md")?;
+        let stages = plan
+            .stages()
+            .iter()
+            .map(|stage| {
+                let targets = stage
+                    .targets()
+                    .iter()
+                    .map(|target| {
+                        json!({
+                            "id": target.id().to_string(),
+                            "name": target.id().name(),
+                            "dependencies": target.dependencies().iter().map(ToString::to_string).collect::<Vec<_>>(),
+                            "description": target.description(),
+                            "specifications": target.specifications(),
+                        })
+                    })
+                    .collect::<Vec<Value>>();
+                json!({"index": stage.index(), "targets": targets})
+            })
+            .collect::<Vec<Value>>();
+        template.render(context!(plan => json!({
+            "root_target": plan.root_target().to_string(),
+            "stages": stages,
+        })))
     }
 }
 
@@ -602,6 +650,70 @@ mod tests {
         assert!(markdown.contains("### 目标 `common::base`"));
         assert!(markdown.contains("- `left`\n- `right`"));
         assert!(markdown.contains("- [ ] finish specification"));
+    }
+
+    // 验证模板能遍历阶段、目标、直接依赖与规格并保留原文。
+    #[test]
+    fn template_renderer_exposes_ordered_plan_data() {
+        let project = healthy_project();
+        let plan = Compiler::new()
+            .plan(&project, id(ModulePath::root(), "finish"))
+            .unwrap();
+        let source = "# {{ plan.root_target }}\n{% for stage in plan.stages %}{{ stage.index }}: {% for target in stage.targets %}{{ target.id }} ({{ target.name }}) {% for dependency in target.dependencies %}[{{ dependency }}]{% endfor %} {{ target.description }} {% for spec in target.specifications %}{{ spec }}{% endfor %}\n{% endfor %}{% endfor %}";
+        let rendered = TemplateMarkdownRenderer::new()
+            .render(source, &plan)
+            .unwrap();
+
+        assert!(rendered.starts_with("# finish\n1: common::base (base)"));
+        assert!(rendered.contains("2: left (left) [common::base]"));
+        assert!(
+            rendered.contains(
+                "3: finish (finish) [left][right] finish description finish specification"
+            )
+        );
+    }
+
+    // 验证模板条件与原始 Markdown 文本在空目标上均可用。
+    #[test]
+    fn template_renderer_handles_missing_content_and_preserves_markdown() {
+        let mut module = Module::new(ModulePath::root());
+        let mut target = make_target(ModulePath::root(), "build");
+        target.set_description("<keep> & **bold**");
+        module.add_target(target).unwrap();
+        let mut project = Project::new(ModulePath::root());
+        project.add_module(module).unwrap();
+        let plan = Compiler::new()
+            .plan(&project, id(ModulePath::root(), "build"))
+            .unwrap();
+        let source = "{% for stage in plan.stages %}{% for target in stage.targets %}{{ target.description }} {% if target.specifications %}has specs{% else %}no specs{% endif %}{% endfor %}{% endfor %}";
+
+        assert_eq!(
+            TemplateMarkdownRenderer::new()
+                .render(source, &plan)
+                .unwrap(),
+            "<keep> & **bold** no specs"
+        );
+    }
+
+    // 验证模板拒绝未知字段、语法错误与外部文件引用。
+    #[test]
+    fn template_renderer_rejects_bad_fields_syntax_and_external_templates() {
+        let project = healthy_project();
+        let plan = Compiler::new()
+            .plan(&project, id(ModulePath::root(), "finish"))
+            .unwrap();
+        for source in [
+            "{{ plan.missing }}",
+            "{% for x in plan.stages %}",
+            "{% include 'secret.md' %}",
+        ] {
+            assert!(
+                TemplateMarkdownRenderer::new()
+                    .render(source, &plan)
+                    .is_err(),
+                "{source}"
+            );
+        }
     }
 
     // 验证简单计划的默认 Markdown 布局保持稳定。

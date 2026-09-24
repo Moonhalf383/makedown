@@ -1,0 +1,17 @@
+{# 场景：突出同阶段可并行的多个领域；适用 examples/valid/07-parallel-launch。 -#}
+# 发布准备看板：{{ plan.root_target }}
+
+同一阶段内的目标互不依赖，可以由不同负责人并行推进；跨阶段必须等待前序阶段验收。
+{% for stage in plan.stages %}
+## 阶段 {{ stage.index }}：{% if stage.targets | length > 1 %}并行任务（{{ stage.targets | length }} 项）{% else %}单项任务{% endif %}
+
+| 状态 | 目标 | 前置目标数 | 验收项数 |
+| --- | --- | ---: | ---: |
+{%- for target in stage.targets %}
+| 待办 | `{{ target.id }}` | {{ target.dependencies | length }} | {{ target.specifications | length }} |
+{%- endfor %}
+
+{% if stage.targets | length > 1 %}
+> 本阶段允许并行实施；开始下一阶段之前，请逐项确认验收。
+{% endif %}
+{% endfor %}

@@ -208,7 +208,7 @@ fn server_completes_and_finds_references_after_unsaved_changes() {
     );
     assert_eq!(
         reply(1)["result"]["capabilities"]["completionProvider"]["triggerCharacters"],
-        json!([" ", ":", ">"])
+        json!([" ", ":", ">", "."])
     );
     assert!(
         messages
@@ -272,6 +272,66 @@ fn server_completes_and_finds_references_after_unsaved_changes() {
     assert_eq!(reply(8)["result"].as_array().unwrap().len(), 6);
     assert_eq!(reply(9)["result"], Value::Null);
     fs::remove_dir_all(root).unwrap();
+}
+
+// 验证模板未保存内容只收到语法和已知字段诊断，并按上下文提供字段补全。
+#[test]
+fn server_diagnoses_and_completes_markdown_templates() {
+    let uri = "file:///tmp/untitled.md.j2";
+    let other = "file:///tmp/untitled.j2";
+    let completion = |id: u32, uri: &str, line: u32, character: u32| {
+        json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
+            "textDocument":{"uri":uri}, "position":{"line":line,"character":character}}})
+    };
+    let messages = exchange(vec![
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"capabilities":{}}}),
+        json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+            "uri":uri,"languageId":"mkd_template","version":1,"text":"# 文档\n{{ plan.bad }}"}}}),
+        completion(2, uri, 1, 9),
+        json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{
+            "uri":uri,"version":2},"contentChanges":[{"text":"{{ plan.root_target }}"}]}}),
+        completion(3, uri, 0, 9),
+        json!({"jsonrpc":"2.0","id":4,"method":"textDocument/formatting","params":{
+            "textDocument":{"uri":uri},"options":{"tabSize":2,"insertSpaces":true}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{
+            "textDocument":{"uri":uri},"position":{"line":0,"character":10}}}),
+        json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+            "uri":other,"languageId":"jinja","version":1,"text":"{{ plan.bad }}"}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"shutdown","params":null}),
+        json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    ]);
+    let updates = messages
+        .iter()
+        .filter(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == uri
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(updates.len(), 3);
+    assert_eq!(updates[0]["params"]["diagnostics"][0]["code"], "T002");
+    assert!(
+        updates[1]["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let reply = |id| messages.iter().find(|item| item["id"] == id).unwrap();
+    assert!(reply(2)["result"].as_array().unwrap().is_empty());
+    assert_eq!(reply(3)["result"][0]["label"], "root_target");
+    assert_eq!(reply(4)["error"]["code"], -32601);
+    assert!(reply(5)["result"].is_null());
+    let other_diagnostics = messages
+        .iter()
+        .find(|message| {
+            message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == other
+        })
+        .unwrap();
+    assert_ne!(
+        other_diagnostics["params"]["diagnostics"][0]["code"],
+        "T002"
+    );
 }
 
 // 验证协议初始化、未保存内容诊断、格式化、关闭及正常退出。
