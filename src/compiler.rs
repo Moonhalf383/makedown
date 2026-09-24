@@ -314,10 +314,20 @@ fn push_line(output: &mut String, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Module, ModulePath, Spec, Target};
+    use crate::core::{Module, ModulePath, Spec, Target, TargetName};
     use crate::project::{AnalysisMode, ProjectAnalyzer};
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
+
+    // 为测试快速构造不附带内容的目标。
+    fn make_target(namespace: ModulePath, name: &str) -> Target {
+        Target::new(namespace, TargetName::parse(name).unwrap())
+    }
 
     // 为测试快速构造合法模块路径。
     fn path(path: &str) -> ModulePath {
@@ -344,7 +354,7 @@ mod tests {
         } else {
             ModulePath::new(segments).unwrap()
         };
-        TargetId::new(namespace, name)
+        id(namespace, &name)
     }
 
     // 按稳定顺序返回全部合法示例目录。
@@ -364,7 +374,7 @@ mod tests {
 
     // 创建带描述、规格和依赖的测试目标。
     fn target(namespace: ModulePath, name: &str, dependencies: Vec<TargetId>) -> Target {
-        let mut target = Target::new(namespace, name);
+        let mut target = make_target(namespace, name);
         target.set_description(format!("{name} description"));
         target.add_specification(Spec::new(format!("{name} specification")));
         for dependency in dependencies {
@@ -387,24 +397,17 @@ mod tests {
             .add_target(target(
                 root.clone(),
                 "left",
-                vec![TargetId::new(common.clone(), "base")],
+                vec![id(common.clone(), "base")],
             ))
             .unwrap();
         root_module
-            .add_target(target(
-                root.clone(),
-                "right",
-                vec![TargetId::new(common, "base")],
-            ))
+            .add_target(target(root.clone(), "right", vec![id(common, "base")]))
             .unwrap();
         root_module
             .add_target(target(
                 root.clone(),
                 "finish",
-                vec![
-                    TargetId::new(root.clone(), "left"),
-                    TargetId::new(root, "right"),
-                ],
+                vec![id(root.clone(), "left"), id(root, "right")],
             ))
             .unwrap();
 
@@ -440,13 +443,13 @@ mod tests {
         let project = healthy_project();
 
         let plan = Compiler::new()
-            .plan(&project, TargetId::new(ModulePath::root(), "finish"))
+            .plan(&project, id(ModulePath::root(), "finish"))
             .unwrap();
 
         assert_eq!(plan.stages().len(), 3);
         assert_eq!(
             plan.stages()[0].targets()[0].id(),
-            &TargetId::new(path("common"), "base")
+            &id(path("common"), "base")
         );
         assert_eq!(
             plan.stages()[1]
@@ -491,7 +494,7 @@ mod tests {
             .unwrap();
 
         let plan = Compiler::new()
-            .plan(&project, TargetId::new(ModulePath::root(), "left"))
+            .plan(&project, id(ModulePath::root(), "left"))
             .unwrap();
         let names = plan
             .stages()
@@ -507,7 +510,7 @@ mod tests {
     #[test]
     fn plan_rejects_missing_targets() {
         let project = Project::new(ModulePath::root());
-        let missing = TargetId::new(ModulePath::root(), "missing");
+        let missing = id(ModulePath::root(), "missing");
 
         let error = Compiler::new().plan(&project, missing.clone()).unwrap_err();
 
@@ -518,7 +521,7 @@ mod tests {
     #[test]
     fn plan_rejects_missing_transitive_dependencies() {
         let root = ModulePath::root();
-        let missing = TargetId::new(root.clone(), "missing");
+        let missing = id(root.clone(), "missing");
         let mut module = Module::new(root.clone());
         module
             .add_target(target(root.clone(), "build", vec![missing.clone()]))
@@ -527,7 +530,7 @@ mod tests {
         project.add_module(module).unwrap();
 
         let error = Compiler::new()
-            .plan(&project, TargetId::new(root, "build"))
+            .plan(&project, id(root, "build"))
             .unwrap_err();
 
         assert_eq!(error, CompileError::TargetNotFound(missing));
@@ -539,25 +542,15 @@ mod tests {
         let root = ModulePath::root();
         let mut module = Module::new(root.clone());
         module
-            .add_target(target(
-                root.clone(),
-                "a",
-                vec![TargetId::new(root.clone(), "b")],
-            ))
+            .add_target(target(root.clone(), "a", vec![id(root.clone(), "b")]))
             .unwrap();
         module
-            .add_target(target(
-                root.clone(),
-                "b",
-                vec![TargetId::new(root.clone(), "a")],
-            ))
+            .add_target(target(root.clone(), "b", vec![id(root.clone(), "a")]))
             .unwrap();
         let mut project = Project::new(root.clone());
         project.add_module(module).unwrap();
 
-        let error = Compiler::new()
-            .plan(&project, TargetId::new(root, "a"))
-            .unwrap_err();
+        let error = Compiler::new().plan(&project, id(root, "a")).unwrap_err();
 
         assert!(matches!(error, CompileError::DependencyCycle(_)));
     }
@@ -566,7 +559,7 @@ mod tests {
     #[test]
     fn plan_rejects_self_dependencies() {
         let root = ModulePath::root();
-        let self_id = TargetId::new(root.clone(), "recursive");
+        let self_id = id(root.clone(), "recursive");
         let mut module = Module::new(root.clone());
         module
             .add_target(target(root.clone(), "recursive", vec![self_id.clone()]))
@@ -585,7 +578,7 @@ mod tests {
         let project = healthy_project();
 
         let markdown = Compiler::new()
-            .compile(&project, TargetId::new(ModulePath::root(), "finish"))
+            .compile(&project, id(ModulePath::root(), "finish"))
             .unwrap();
 
         assert!(markdown.starts_with("# 规格实施计划：finish\n"));
@@ -597,7 +590,7 @@ mod tests {
     fn default_renderer_emits_an_actionable_markdown_plan() {
         let project = healthy_project();
         let plan = Compiler::new()
-            .plan(&project, TargetId::new(ModulePath::root(), "finish"))
+            .plan(&project, id(ModulePath::root(), "finish"))
             .unwrap();
 
         let markdown = DefaultMarkdownRenderer::new().render(&plan);
@@ -621,7 +614,7 @@ mod tests {
         let mut project = Project::new(ModulePath::root());
         project.add_module(module).unwrap();
         let plan = Compiler::new()
-            .plan(&project, TargetId::new(ModulePath::root(), "build"))
+            .plan(&project, id(ModulePath::root(), "build"))
             .unwrap();
 
         let markdown = DefaultMarkdownRenderer::new().render(&plan);
@@ -658,12 +651,12 @@ build description\n\
     fn default_renderer_marks_missing_optional_content() {
         let mut module = Module::new(ModulePath::root());
         module
-            .add_target(Target::new(ModulePath::root(), "empty"))
+            .add_target(make_target(ModulePath::root(), "empty"))
             .unwrap();
         let mut project = Project::new(ModulePath::root());
         project.add_module(module).unwrap();
         let plan = Compiler::new()
-            .plan(&project, TargetId::new(ModulePath::root(), "empty"))
+            .plan(&project, id(ModulePath::root(), "empty"))
             .unwrap();
 
         let markdown = DefaultMarkdownRenderer::new().render(&plan);

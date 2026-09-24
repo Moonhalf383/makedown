@@ -123,6 +123,12 @@ fn single_line(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::TargetName;
+
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
 
     // 验证自动颜色只在终端中启用。
     #[test]
@@ -155,9 +161,7 @@ mod tests {
     fn colored_logs_use_cyan_progress_and_red_errors() {
         let mut output = Vec::new();
         let mut logger = Logger::new(&mut output, true);
-        logger
-            .compiling(&TargetId::new(ModulePath::root(), "build"))
-            .unwrap();
+        logger.compiling(&id(ModulePath::root(), "build")).unwrap();
         logger.error("failed").unwrap();
         logger
             .finished("built target `build`", Duration::ZERO)

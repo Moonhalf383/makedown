@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::{Module, ModulePath, Project, Spec, Target, TargetId};
+use crate::core::{Module, ModulePath, Project, Spec, Target, TargetId, TargetName};
 use crate::parser::{
     DiagnosticSeverity, ParseMode, ParsedInclude, ParsedModule, ParsedReference, Parser,
 };
@@ -539,7 +539,10 @@ impl<'a> AnalysisState<'a> {
             module.add_include(imported_target.clone());
         }
         for parsed_target in parsed.targets() {
-            let mut target = Target::new(namespace.clone(), parsed_target.name());
+            let Ok(name) = TargetName::parse(parsed_target.name()) else {
+                continue;
+            };
+            let mut target = Target::new(namespace.clone(), name);
             target.set_description(parsed_target.description());
             for specification in parsed_target.specifications() {
                 target.add_specification(Spec::new(specification));
@@ -560,7 +563,9 @@ impl<'a> AnalysisState<'a> {
                 }
                 let name = &segments[0];
                 let resolved = if local_names.contains(name) {
-                    Some(TargetId::new(namespace.clone(), name))
+                    TargetName::parse(name)
+                        .ok()
+                        .map(|name| TargetId::new(namespace.clone(), name))
                 } else {
                     imports.get(name).cloned()
                 };
@@ -651,7 +656,18 @@ impl<'a> AnalysisState<'a> {
             return None;
         }
 
-        let target_name = segments.last().unwrap().clone();
+        let target_name = match TargetName::parse(segments.last().unwrap()) {
+            Ok(name) => name,
+            Err(error) => {
+                self.diagnostics.push(AnalysisDiagnostic::error(
+                    file.to_owned(),
+                    Some(reference.line()),
+                    "P019",
+                    error.to_string(),
+                ));
+                return None;
+            }
+        };
         let mut module_segments = match segments[0].as_str() {
             "crate" => Vec::new(),
             "self" => parent_segments(current),
@@ -810,6 +826,11 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
+
     // 为测试快速构造合法模块路径。
     fn path(path: &str) -> ModulePath {
         ModulePath::parse(path).unwrap()
@@ -850,7 +871,7 @@ mod tests {
         } else {
             ModulePath::new(segments).unwrap()
         };
-        TargetId::new(namespace, name)
+        id(namespace, &name)
     }
 
     // 按稳定顺序返回指定分类中的示例目录。
@@ -879,7 +900,7 @@ mod tests {
             ("shared.mf", "---\n# check\n---\n> check\n"),
         ]);
         let analyzer = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
         let mut seen = Vec::new();
 
         analyzer
@@ -909,7 +930,7 @@ mod tests {
             ("shared.mf", "---\n# check\n---\n> check\n"),
             ("broken.mf", "not valid"),
         ]);
-        let start = TargetId::new(path("app"), "run");
+        let start = id(path("app"), "run");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
         let project = result.project().unwrap();
@@ -932,7 +953,7 @@ mod tests {
             ),
             ("catalog/model.mf", "---\n# check\n---\n> check\n"),
         ]);
-        let start = TargetId::new(path("catalog::api"), "publish");
+        let start = id(path("catalog::api"), "publish");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
         let target = result
@@ -946,8 +967,8 @@ mod tests {
         assert_eq!(
             target.dependencies(),
             &[
-                TargetId::new(path("catalog::model"), "check"),
-                TargetId::new(ModulePath::root(), "root_check"),
+                id(path("catalog::model"), "check"),
+                id(ModulePath::root(), "root_check"),
             ]
         );
         fs::remove_dir_all(root).unwrap();
@@ -968,7 +989,7 @@ mod tests {
             ("two.mf", "---\n# check\n---\n> check\n"),
             ("private.mf", "---\n# hidden\n---\n"),
         ]);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
         let codes = result
@@ -988,7 +1009,7 @@ mod tests {
     #[test]
     fn dry_run_scans_the_same_reachable_graph_without_returning_a_project() {
         let root = fixture(&[("main.mf", "---\n# run\n---\n> run\n")]);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
 
         let result =
             ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::DryRun).analyze(start);
@@ -996,6 +1017,35 @@ mod tests {
         assert!(!result.has_errors());
         assert!(result.project().is_none());
         assert!(result.into_project().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // 验证非法导入目标名称被定位且其他文件仍被分析。
+    #[test]
+    fn invalid_import_target_name_reports_an_error_without_stopping_analysis() {
+        let root = fixture(&[
+            (
+                "main.mf",
+                "> crate::shared::bad`name\n> crate::shared::ready\n---\n# run\n> ready\n---\n> run\n",
+            ),
+            ("shared.mf", "---\n# ready\n- accepted\n---\n> ready\n"),
+        ]);
+        let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::DryRun)
+            .analyze(id(ModulePath::root(), "run"));
+
+        assert!(result.project().is_none());
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| { diagnostic.code() == "P019" && diagnostic.line() == Some(1) })
+        );
+        assert!(
+            !result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code() == "P005")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1009,7 +1059,7 @@ mod tests {
             ),
             ("shared.mf", "---\n# ok\n---\n> ok\n"),
         ]);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
 
         let result =
             ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::DryRun).analyze(start);
@@ -1036,7 +1086,7 @@ mod tests {
             ),
             ("shared.mf", "---\n# check\n---\n> check\n"),
         ]);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
 
@@ -1052,7 +1102,7 @@ mod tests {
     #[test]
     fn root_file_cannot_be_loaded_again_as_a_named_module() {
         let root = fixture(&[("main.mf", "> crate::main::root\n---\n# root\n---\n> root\n")]);
-        let start = TargetId::new(ModulePath::root(), "root");
+        let start = id(ModulePath::root(), "root");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
 
@@ -1072,7 +1122,7 @@ mod tests {
             "main.mf",
             "> super::outside::check\n---\n# run\n---\n> run\n",
         )]);
-        let start = TargetId::new(ModulePath::root(), "run");
+        let start = id(ModulePath::root(), "run");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
 
@@ -1137,7 +1187,7 @@ mod tests {
             "main.mf",
             "> crate::missing::target\n---\n# run\n---\n> run\n",
         )]);
-        let start = TargetId::new(ModulePath::root(), "absent");
+        let start = id(ModulePath::root(), "absent");
 
         let result = ProjectAnalyzer::new(root.join("main.mf"), AnalysisMode::Build).analyze(start);
         let codes = result

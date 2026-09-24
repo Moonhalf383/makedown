@@ -10,7 +10,7 @@ use lsp_types::{
 };
 use url::Url;
 
-use crate::core::{ModulePath, TargetId};
+use crate::core::{ModulePath, TargetId, TargetName};
 use crate::parser::{ParsedModule, ParsedReference};
 use crate::project::{AnalysisDiagnostic, AnalysisMode, ProjectAnalyzer};
 
@@ -188,7 +188,7 @@ impl ProjectView {
             .any(|item| item.line() == line_number)
         {
             active(start, word)?;
-            TargetId::new(self.current.clone(), word)
+            TargetId::new(self.current.clone(), TargetName::parse(word).ok()?)
         } else if let Some(include) = module
             .includes()
             .iter()
@@ -216,7 +216,7 @@ impl ProjectView {
                 .iter()
                 .any(|target| target.name() == name[0])
             {
-                TargetId::new(self.current.clone(), &name[0])
+                TargetId::new(self.current.clone(), TargetName::parse(&name[0]).ok()?)
             } else {
                 let include = module.includes().iter().find(|item| {
                     item.alias()
@@ -269,7 +269,9 @@ impl ProjectView {
             let last = first + u32::try_from(target.name().encode_utf16().count()).ok()?;
             return (first..last)
                 .contains(&position.character)
-                .then(|| TargetId::new(self.current.clone(), target.name()));
+                .then(|| TargetName::parse(target.name()).ok())
+                .flatten()
+                .map(|name| TargetId::new(self.current.clone(), name));
         }
         let location = self.definition(position)?;
         let file = Url::parse(location.uri.as_str())
@@ -285,7 +287,11 @@ impl ProjectView {
                         .find(|target| {
                             u32::try_from(target.line() - 1).ok() == Some(location.range.start.line)
                         })
-                        .map(|target| TargetId::new(namespace.clone(), target.name()))
+                        .and_then(|target| {
+                            TargetName::parse(target.name())
+                                .ok()
+                                .map(|name| TargetId::new(namespace.clone(), name))
+                        })
                 })
                 .flatten()
         })
@@ -529,7 +535,9 @@ impl ProjectView {
                         continue;
                     }
                     let resolved = if module.targets().iter().any(|item| item.name() == name[0]) {
-                        Some(TargetId::new(namespace.clone(), &name[0]))
+                        TargetName::parse(&name[0])
+                            .ok()
+                            .map(|name| TargetId::new(namespace.clone(), name))
                     } else {
                         module
                             .includes()
@@ -644,7 +652,7 @@ impl ProjectView {
         module.extend_from_slice(&segments[1..segments.len() - 1]);
         Some(TargetId::new(
             ModulePath::new(module).ok()?,
-            segments.last()?,
+            TargetName::parse(segments.last()?).ok()?,
         ))
     }
 
@@ -721,7 +729,13 @@ fn utf16_offset(line: &str, column: u32) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::TargetName;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
 
     // 创建隔离的项目目录以测试未保存内容和跨文件跳转。
     fn fixture() -> PathBuf {
@@ -1021,7 +1035,7 @@ mod tests {
         )
         .unwrap();
         let view = ProjectView::index(&main, &HashMap::new()).unwrap();
-        let target = TargetId::new(ModulePath::root(), "😀build");
+        let target = id(ModulePath::root(), "😀build");
         assert_eq!(view.symbol_at(Position::new(1, 2)), Some(target.clone()));
         assert_eq!(view.symbol_at(Position::new(1, 4)), Some(target.clone()));
         assert_eq!(view.symbol_at(Position::new(1, 3)), None);
@@ -1059,7 +1073,7 @@ mod tests {
         .unwrap();
         fs::write(&shared, "---\n# ready\n- done\n---\n> ready\n").unwrap();
         let view = ProjectView::index(&main, &HashMap::new()).unwrap();
-        let ready = TargetId::new(ModulePath::parse("shared").unwrap(), "ready");
+        let ready = id(ModulePath::parse("shared").unwrap(), "ready");
 
         let target = view.symbol_at(Position::new(3, 3)).unwrap();
         assert_eq!(target, ready);

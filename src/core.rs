@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -99,20 +100,79 @@ impl fmt::Display for ModulePathError {
 
 impl Error for ModulePathError {}
 
+/// 表示经过校验、可安全用于目标标识的本地名称。
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TargetName(String);
+
+impl TargetName {
+    /// 校验文本并创建目标名称。
+    pub fn parse(name: &str) -> Result<Self, TargetNameError> {
+        if name.is_empty() {
+            return Err(TargetNameError::Empty);
+        }
+        if name == "."
+            || name == ".."
+            || name.chars().any(|character| {
+                character.is_whitespace()
+                    || character.is_control()
+                    || matches!(character, '/' | '\\' | ':' | '`')
+            })
+        {
+            return Err(TargetNameError::Invalid(name.to_owned()));
+        }
+        Ok(Self(name.to_owned()))
+    }
+
+    /// 借用已校验的目标名称文本。
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for TargetName {
+    // 允许按原始文本查询使用目标名称作键的映射。
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for TargetName {
+    // 将目标名称渲染为原始文本。
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// 描述目标名称校验失败的原因。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TargetNameError {
+    Empty,
+    Invalid(String),
+}
+
+impl fmt::Display for TargetNameError {
+    // 将目标名称错误渲染为可读文本。
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("a target name cannot be empty"),
+            Self::Invalid(name) => write!(formatter, "`{name}` is not a valid target name"),
+        }
+    }
+}
+
+impl Error for TargetNameError {}
+
 /// 使用模块路径与名称唯一标识目标。
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TargetId {
     namespace: ModulePath,
-    name: String,
+    name: TargetName,
 }
 
 impl TargetId {
-    /// 组合模块路径和名称创建目标标识。
-    pub fn new(namespace: ModulePath, name: impl Into<String>) -> Self {
-        Self {
-            namespace,
-            name: name.into(),
-        }
+    /// 组合模块路径和已校验的名称创建目标标识。
+    pub fn new(namespace: ModulePath, name: TargetName) -> Self {
+        Self { namespace, name }
     }
 
     /// 返回目标所属的模块路径。
@@ -122,7 +182,7 @@ impl TargetId {
 
     /// 返回目标的本地名称。
     pub fn name(&self) -> &str {
-        &self.name
+        self.name.as_str()
     }
 }
 
@@ -130,7 +190,7 @@ impl fmt::Display for TargetId {
     // 将目标标识渲染为限定名称。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.namespace.is_root() {
-            formatter.write_str(&self.name)
+            formatter.write_str(self.name.as_str())
         } else {
             write!(formatter, "{}::{}", self.namespace, self.name)
         }
@@ -142,9 +202,11 @@ fn is_valid_path_segment(segment: &str) -> bool {
     !segment.is_empty()
         && segment != "."
         && segment != ".."
-        && !segment
-            .chars()
-            .any(|character| character.is_whitespace() || matches!(character, '/' | '\\' | ':'))
+        && !segment.chars().any(|character| {
+            character.is_whitespace()
+                || character.is_control()
+                || matches!(character, '/' | '\\' | ':' | '`')
+        })
 }
 
 /// 表示目标能否被其他模块引用。
@@ -167,7 +229,7 @@ pub struct Target {
 
 impl Target {
     /// 创建默认私有且内容为空的目标。
-    pub fn new(namespace: ModulePath, name: impl Into<String>) -> Self {
+    pub fn new(namespace: ModulePath, name: TargetName) -> Self {
         Self {
             id: TargetId::new(namespace, name),
             visibility: Visibility::Private,
@@ -253,7 +315,7 @@ impl Target {
 pub struct Module {
     namespace: ModulePath,
     includes: Vec<TargetId>,
-    targets: BTreeMap<String, Target>,
+    targets: BTreeMap<TargetName, Target>,
 }
 
 impl Module {
@@ -322,7 +384,7 @@ impl Module {
             });
         }
 
-        let name = target.name().to_owned();
+        let name = target.id.name.clone();
         match self.targets.entry(name.clone()) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(target);
@@ -338,7 +400,7 @@ impl Module {
 /// 描述向模块添加目标失败的原因。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AddTargetError {
-    DuplicateName(String),
+    DuplicateName(TargetName),
     NamespaceMismatch {
         module: ModulePath,
         target: TargetId,
@@ -461,6 +523,16 @@ impl Error for AddModuleError {}
 mod tests {
     use super::*;
 
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
+
+    // 为测试快速构造经过校验的目标。
+    fn make_target(namespace: ModulePath, name: &str) -> Target {
+        Target::new(namespace, TargetName::parse(name).unwrap())
+    }
+
     // 为测试快速构造合法模块路径。
     fn path(path: &str) -> ModulePath {
         ModulePath::parse(path).unwrap()
@@ -493,26 +565,68 @@ mod tests {
             ModulePath::parse("catalog::../secret"),
             Err(ModulePathError::InvalidSegment("../secret".to_owned()))
         );
+        for invalid in ["api`docs", "api\0docs"] {
+            assert_eq!(
+                ModulePath::parse(invalid),
+                Err(ModulePathError::InvalidSegment(invalid.to_owned()))
+            );
+        }
+    }
+
+    // 验证合法目标名称可创建身份并用于按文本查询。
+    #[test]
+    fn target_name_preserves_unicode_and_supports_module_lookup() {
+        let name = TargetName::parse("😀build").unwrap();
+        let mut module = Module::new(ModulePath::root());
+        module
+            .add_target(Target::new(ModulePath::root(), name.clone()))
+            .unwrap();
+
+        assert_eq!(name.as_str(), "😀build");
+        assert_eq!(
+            module.target("😀build").unwrap().id(),
+            &TargetId::new(ModulePath::root(), name)
+        );
+    }
+
+    // 验证不安全目标名称不能进入核心领域模型。
+    #[test]
+    fn target_name_rejects_empty_or_ambiguous_names() {
+        assert_eq!(TargetName::parse(""), Err(TargetNameError::Empty));
+        for invalid in [
+            ".",
+            "..",
+            "bad name",
+            "bad\tname",
+            "bad\nname",
+            "bad::name",
+            "bad/name",
+            "bad\\name",
+            "bad`name",
+        ] {
+            assert_eq!(
+                TargetName::parse(invalid),
+                Err(TargetNameError::Invalid(invalid.to_owned())),
+                "{invalid:?}"
+            );
+        }
     }
 
     // 验证目标保留描述、依赖与规格。
     #[test]
     fn target_keeps_its_description_dependencies_and_specifications() {
-        let mut target = Target::new(path("guide"), "publish");
+        let mut target = make_target(path("guide"), "publish");
         target.append_description("Build the guide.");
         target.append_description("Publish the result.");
-        target.add_dependency(TargetId::new(path("guide"), "build"));
-        target.add_dependency(TargetId::new(path("guide"), "build"));
+        target.add_dependency(id(path("guide"), "build"));
+        target.add_dependency(id(path("guide"), "build"));
         target.add_specification(Spec::new("The guide renders successfully."));
 
         assert_eq!(
             target.description(),
             "Build the guide.\nPublish the result."
         );
-        assert_eq!(
-            target.dependencies(),
-            &[TargetId::new(path("guide"), "build")]
-        );
+        assert_eq!(target.dependencies(), &[id(path("guide"), "build")]);
         assert_eq!(
             target.specifications()[0].content(),
             "The guide renders successfully."
@@ -524,17 +638,20 @@ mod tests {
     fn module_rejects_duplicate_target_names_without_replacing_the_original() {
         let mut module = Module::new(path("guide"));
         module
-            .add_target(Target::new(path("guide"), "build"))
+            .add_target(make_target(path("guide"), "build"))
             .unwrap();
 
         let error = module
-            .add_target(Target::new(path("guide"), "build"))
+            .add_target(make_target(path("guide"), "build"))
             .unwrap_err();
 
-        assert_eq!(error, AddTargetError::DuplicateName("build".to_owned()));
+        assert_eq!(
+            error,
+            AddTargetError::DuplicateName(TargetName::parse("build").unwrap())
+        );
         assert_eq!(
             module.target("build").unwrap().id(),
-            &TargetId::new(path("guide"), "build")
+            &id(path("guide"), "build")
         );
     }
 
@@ -542,11 +659,11 @@ mod tests {
     #[test]
     fn module_exposes_targets_and_deduplicates_includes() {
         let mut module = Module::new(path("guide"));
-        let included_target = TargetId::new(path("common"), "lint");
+        let included_target = id(path("common"), "lint");
         module.add_include(included_target.clone());
         module.add_include(included_target.clone());
         module
-            .add_target(Target::new(path("guide"), "build"))
+            .add_target(make_target(path("guide"), "build"))
             .unwrap();
         module
             .target_mut("build")
@@ -568,10 +685,10 @@ mod tests {
     fn targets_are_private_until_the_module_publishes_them() {
         let mut module = Module::new(path("guide"));
         module
-            .add_target(Target::new(path("guide"), "build"))
+            .add_target(make_target(path("guide"), "build"))
             .unwrap();
         module
-            .add_target(Target::new(path("guide"), "draft"))
+            .add_target(make_target(path("guide"), "draft"))
             .unwrap();
 
         module.publish_target("build").unwrap();
@@ -609,14 +726,14 @@ mod tests {
         let mut module = Module::new(path("guide"));
 
         let error = module
-            .add_target(Target::new(path("other"), "build"))
+            .add_target(make_target(path("other"), "build"))
             .unwrap_err();
 
         assert_eq!(
             error,
             AddTargetError::NamespaceMismatch {
                 module: path("guide"),
-                target: TargetId::new(path("other"), "build"),
+                target: id(path("other"), "build"),
             }
         );
     }
@@ -632,12 +749,12 @@ mod tests {
         project
             .root_mut()
             .unwrap()
-            .add_target(Target::new(path("application"), "run"))
+            .add_target(make_target(path("application"), "run"))
             .unwrap();
         project
             .module_mut(&path("library"))
             .unwrap()
-            .add_target(Target::new(path("library"), "serve"))
+            .add_target(make_target(path("library"), "serve"))
             .unwrap();
 
         assert_eq!(project.root_module(), &path("application"));

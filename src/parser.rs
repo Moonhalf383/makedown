@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::core::ModulePath;
+use crate::core::{ModulePath, TargetName};
 
 /// 保存尚未由项目分析器解析的目标路径。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -435,6 +435,11 @@ impl ParseState {
                 ));
                 return;
             }
+            if let Err(error) = TargetName::parse(name) {
+                self.diagnostics
+                    .push(Diagnostic::error(line_number, "E013", error.to_string()));
+                return;
+            }
             if !self.target_names.insert(name.to_owned()) {
                 self.diagnostics.push(Diagnostic::error(
                     line_number,
@@ -516,6 +521,11 @@ impl ParseState {
             ));
             return;
         }
+        if let Err(error) = TargetName::parse(name) {
+            self.diagnostics
+                .push(Diagnostic::error(line_number, "E013", error.to_string()));
+            return;
+        }
         self.public_targets.push(ParsedPublicTarget {
             name: name.to_owned(),
             line: line_number,
@@ -534,7 +544,7 @@ impl ParseState {
         let words = value.split_whitespace().collect::<Vec<_>>();
         match words.as_slice() {
             [path] => Some((self.parse_path(line_number, path), None)),
-            [path, "as", alias] if !alias.contains("::") => Some((
+            [path, "as", alias] if TargetName::parse(alias).is_ok() => Some((
                 self.parse_path(line_number, path),
                 Some((*alias).to_owned()),
             )),
@@ -696,6 +706,27 @@ Build the documentation.\x20\x20
             DiagnosticSeverity::Warning
         );
         assert_eq!(result.diagnostics()[0].line(), 1);
+    }
+
+    // 验证非法目标声明与公开名称均留下有位置的诊断。
+    #[test]
+    fn parser_rejects_invalid_target_names_without_stopping_scan() {
+        let result = Parser::new(ParseMode::Build).parse(
+            ModulePath::root(),
+            "---\n# bad`name\n# valid\n- valid spec\n---\n> bad`name\n> valid\n",
+        );
+
+        assert!(result.module().is_none());
+        assert_eq!(
+            result
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code() == "E013")
+                .map(Diagnostic::line)
+                .collect::<Vec<_>>(),
+            [2, 6]
+        );
+        assert_eq!(result.partial_module().targets()[0].name(), "valid");
     }
 
     // 验证解析器收集全部错误且不交付错误模型。

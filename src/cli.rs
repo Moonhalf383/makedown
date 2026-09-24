@@ -10,7 +10,7 @@ use std::time::Instant;
 use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
 
 use crate::compiler::{CompileError, Compiler, DefaultMarkdownRenderer};
-use crate::core::{ModulePath, ModulePathError, TargetId};
+use crate::core::{ModulePath, ModulePathError, TargetId, TargetName};
 use crate::formatter::{FormatError, Formatter};
 use crate::linter::Linter;
 use crate::logging::{ColorChoice, Logger};
@@ -420,8 +420,8 @@ fn parse_target_id(value: &str) -> Result<TargetId, CliError> {
     let mut segments = value.split("::").map(str::to_owned).collect::<Vec<_>>();
     let name = segments
         .pop()
-        .filter(|name| is_valid_target_name(name))
         .ok_or_else(|| CliError::InvalidTarget(value.to_owned()))?;
+    let name = TargetName::parse(&name).map_err(|_| CliError::InvalidTarget(value.to_owned()))?;
     let namespace = if segments.is_empty() {
         ModulePath::root()
     } else {
@@ -433,16 +433,6 @@ fn parse_target_id(value: &str) -> Result<TargetId, CliError> {
 // 将模块路径错误转换为统一的目标参数错误。
 fn invalid_module_path(value: &str, _error: ModulePathError) -> CliError {
     CliError::InvalidTarget(value.to_owned())
-}
-
-// 判断目标名称是否可安全用于逻辑标识和 Markdown 标题。
-fn is_valid_target_name(name: &str) -> bool {
-    !name.is_empty()
-        && name != "."
-        && name != ".."
-        && !name.chars().any(|character| {
-            character.is_whitespace() || matches!(character, '/' | '\\' | ':' | '`')
-        })
 }
 
 // 将相对路径解释为相对于命令启动目录的路径。
@@ -465,8 +455,14 @@ fn paths_alias(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::TargetName;
     use clap::CommandFactory;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // 为测试快速构造经过校验的目标标识。
+    fn id(namespace: ModulePath, name: &str) -> TargetId {
+        TargetId::new(namespace, TargetName::parse(name).unwrap())
+    }
 
     // 在唯一临时目录中创建 CLI 测试项目。
     fn fixture(files: &[(&str, &str)]) -> PathBuf {
@@ -507,20 +503,33 @@ mod tests {
     fn target_parser_accepts_root_and_namespaced_targets() {
         assert_eq!(
             parse_target_id("build").unwrap(),
-            TargetId::new(ModulePath::root(), "build")
+            id(ModulePath::root(), "build")
         );
         assert_eq!(
             parse_target_id("catalog::api::publish").unwrap(),
-            TargetId::new(ModulePath::parse("catalog::api").unwrap(), "publish")
+            id(ModulePath::parse("catalog::api").unwrap(), "publish")
         );
     }
 
     // 验证目标参数拒绝空分段和 Markdown 定界符。
     #[test]
     fn target_parser_rejects_invalid_names() {
-        for target in ["", "catalog::::build", "catalog::", "bad name", "bad`name"] {
+        for target in [
+            "",
+            "catalog::::build",
+            "catalog::",
+            "bad name",
+            "bad`name",
+            "bad/name",
+            "bad\tname",
+            "catalog::.",
+        ] {
             assert!(parse_target_id(target).is_err(), "{target}");
         }
+        assert_eq!(
+            parse_target_id("😀build").unwrap(),
+            id(ModulePath::root(), "😀build")
+        );
     }
 
     // 验证根文件发现选择最近的上级 main.mf。
