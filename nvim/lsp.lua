@@ -17,8 +17,9 @@ vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(event)
     local client = vim.lsp.get_client_by_id(event.data.client_id)
     if client and client.name == "mkd" then
-      -- 预览窗口用于显示候选携带的目标正文。
-      vim.bo[event.buf].completeopt = "menuone,noselect,popup"
+      -- 预选首条候选使 CompleteChanged 立即触发，
+      -- 否则 noselect 下预览窗口永远不会显示候选文档。
+      vim.bo[event.buf].completeopt = "menuone,popup"
       vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
     end
   end,
