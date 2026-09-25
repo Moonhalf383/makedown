@@ -1,1 +1,9 @@
 /target
+/dist/
+/vscode/node_modules/
+/vscode/out/
+/vscode/bin/
+/vscode/LICENSE
+/vscode/icon.png
+/vscode/*.vsix
+/vscode/*.vsixmanifest

@@ -1,7 +1,19 @@
 [package]
-name = "makedown"
+name = "makedown-cli"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Compile Markfile specifications into staged Markdown implementation plans"
+readme = "README.md"
+repository = "https://github.com/Moonhalf383/makedown"
+homepage = "https://github.com/Moonhalf383/makedown"
+keywords = ["markdown", "planning", "specification", "cli", "lsp"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".github/", "nvim/", "vscode/"]
+
+[lib]
+name = "makedown"
+path = "src/lib.rs"
 
 [[bin]]
 name = "mkd"

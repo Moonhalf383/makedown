@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Moonhalf383/makedown/main/assets/icon.png" alt="Makedown 图标" width="192">
+</p>
+
 ```text
 ███╗   ███╗ █████╗ ██╗  ██╗███████╗██████╗  ██████╗ ██╗    ██╗███╗   ██╗
 ████╗ ████║██╔══██╗██║ ██╔╝██╔════╝██╔══██╗██╔═══██╗██║    ██║████╗  ██║
@@ -70,7 +74,13 @@ cargo run --quiet --bin mkd -- target greet --root examples/valid/01-single-targ
 
 ## 安装与写一份自己的工作说明
 
-在准备存放项目的目录中运行：
+通过 crates.io 安装命令行工具：
+
+```sh
+cargo install makedown-cli --locked
+```
+
+安装完成后，在准备存放项目的目录中运行：
 
 ```sh
 mkd init my-project
@@ -78,7 +88,7 @@ cd my-project
 mkd build
 ```
 
-工具会在 `my-project` 中创建入口文件 `main.mf` 和构建设置 `mkd.toml`，再将实施计划写入 `dist/plan.md`。新项目中的目标叫 `start`。上面的示例使用从源码运行的方式；如果已经通过 `cargo install --git https://github.com/Moonhalf383/makedown --locked` 安装了 `mkd`，可直接把命令换成 `mkd init my-project` 和 `mkd build`。完整的初始化方式和配置写法见[项目配置说明](docs/config.md)。
+工具会在 `my-project` 中创建入口文件 `main.mf` 和构建设置 `mkd.toml`，再将实施计划写入 `dist/plan.md`。新项目中的目标叫 `start`。也可以从 [GitHub Releases](https://github.com/Moonhalf383/makedown/releases) 下载适合当前平台的预编译程序。完整的初始化方式和配置写法见[项目配置说明](docs/config.md)。
 
 `mkd init` 创建的 `main.mf` 同样由上述三个区域组成，只是顶部导入区为空，文件以 `---` 开头。把示例文字改成自己的工作内容，再按同样的方式添加前置目标即可。
 

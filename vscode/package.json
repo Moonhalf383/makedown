@@ -1,0 +1,101 @@
+{
+  "name": "makedown",
+  "displayName": "Makedown",
+  "description": "Edit Markfile specifications and Markdown templates with highlighting, diagnostics, completion, navigation, and formatting.",
+  "version": "0.1.0",
+  "publisher": "Moonhalf383",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Moonhalf383/makedown.git"
+  },
+  "homepage": "https://github.com/Moonhalf383/makedown",
+  "bugs": "https://github.com/Moonhalf383/makedown/issues",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "keywords": [
+    "Markfile",
+    "Markdown",
+    "Makedown",
+    "language server",
+    "specifications"
+  ],
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onLanguage:markfile",
+    "onLanguage:mkd-template"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "markfile",
+        "aliases": [
+          "Markfile"
+        ],
+        "extensions": [
+          ".mf"
+        ],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "mkd-template",
+        "aliases": [
+          "Makedown Markdown Template"
+        ],
+        "filenamePatterns": [
+          "*.md.j2"
+        ],
+        "configuration": "./template-language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "markfile",
+        "scopeName": "source.markfile",
+        "path": "./syntaxes/markfile.tmLanguage.json"
+      },
+      {
+        "language": "mkd-template",
+        "scopeName": "text.html.markdown.mkd-template",
+        "path": "./syntaxes/mkd-template.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p . --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js",
+    "check": "tsc -p . --noEmit",
+    "test": "npm run compile && node --test test/*.test.cjs",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.82.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.2.0"
+  },
+  "files": [
+    "out/",
+    "syntaxes/",
+    "bin/",
+    "language-configuration.json",
+    "template-language-configuration.json",
+    "README.md",
+    "LICENSE",
+    "icon.png"
+  ]
+}

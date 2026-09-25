@@ -1,0 +1,85 @@
+{
+  "name": "Makedown Markdown Template",
+  "scopeName": "text.html.markdown.mkd-template",
+  "patterns": [
+    { "include": "#template" },
+    {
+      "name": "markup.heading.markdown",
+      "begin": "^(#{1,6})(?=[ \\t]+)",
+      "end": "$",
+      "beginCaptures": { "1": { "name": "punctuation.definition.heading.markdown" } },
+      "patterns": [
+        { "include": "#template" },
+        { "include": "text.html.markdown#inline" }
+      ]
+    },
+    {
+      "name": "markup.list.unnumbered.markdown",
+      "begin": "^([ \\t]*[-+*])(?=[ \\t]+)",
+      "end": "$",
+      "beginCaptures": { "1": { "name": "punctuation.definition.list.begin.markdown" } },
+      "patterns": [
+        { "include": "#template" },
+        { "include": "text.html.markdown#inline" }
+      ]
+    },
+    {
+      "name": "markup.table.markdown",
+      "begin": "^(?=\\|)",
+      "end": "$",
+      "patterns": [
+        { "include": "#template" },
+        { "name": "punctuation.definition.table.markdown", "match": "\\|" },
+        { "include": "text.html.markdown#inline" }
+      ]
+    },
+    {
+      "name": "meta.paragraph.markdown",
+      "begin": "^(?![ \\t]*(?:`{3,}|~{3,}|#{1,6}[ \\t]|[-+*>][ \\t]|[0-9]+\\.[ \\t]|\\{[%#]))(?=.+)",
+      "end": "$",
+      "patterns": [
+        { "include": "#template" },
+        { "include": "text.html.markdown#inline" }
+      ]
+    },
+    { "include": "text.html.markdown" }
+  ],
+  "repository": {
+    "template": {
+      "patterns": [
+        {
+          "name": "comment.block.template.mkd",
+          "begin": "\\{#-?",
+          "end": "-?#\\}"
+        },
+        {
+          "name": "meta.expression.template.mkd",
+          "begin": "\\{\\{-?",
+          "end": "-?\\}\\}",
+          "beginCaptures": { "0": { "name": "punctuation.section.expression.begin.mkd" } },
+          "endCaptures": { "0": { "name": "punctuation.section.expression.end.mkd" } },
+          "patterns": [{ "include": "#terms" }]
+        },
+        {
+          "name": "meta.statement.template.mkd",
+          "begin": "\\{%-?",
+          "end": "-?%\\}",
+          "beginCaptures": { "0": { "name": "punctuation.section.statement.begin.mkd" } },
+          "endCaptures": { "0": { "name": "punctuation.section.statement.end.mkd" } },
+          "patterns": [
+            { "name": "keyword.control.template.mkd", "match": "\\b(?:for|endfor|if|elif|else|endif|set|raw|endraw|namespace)\\b" },
+            { "include": "#terms" }
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "patterns": [
+        { "name": "string.quoted.single.template.mkd", "begin": "'", "end": "'", "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.mkd" }] },
+        { "name": "string.quoted.double.template.mkd", "begin": "\"", "end": "\"", "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.mkd" }] },
+        { "name": "variable.other.template.mkd", "match": "\\b(?:plan|stage|target|loop)(?:\\.[A-Za-z_][A-Za-z_0-9]*)*" },
+        { "name": "support.function.filter.template.mkd", "match": "\\|[ \\t]*[A-Za-z_][A-Za-z_0-9]*" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,130 @@
+name: CI and release packages
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - '.github/workflows/vscode-vsix.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - 'tests/**'
+      - 'vscode/**'
+      - 'assets/**'
+      - 'Makefile'
+      - 'LICENSE'
+      - 'README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/vscode-vsix.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - 'tests/**'
+      - 'vscode/**'
+      - 'assets/**'
+      - 'Makefile'
+      - 'LICENSE'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci --prefix vscode
+      - run: npm test --prefix vscode
+      - run: cargo fmt --check
+      - run: cargo test --all-targets
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo package --locked
+
+  package:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+            archive: tar
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            archive: tar
+          - runner: macos-15-intel
+            target: darwin-x64
+            archive: tar
+          - runner: macos-15
+            target: darwin-arm64
+            archive: tar
+          - runner: windows-2022
+            target: win32-x64
+            archive: zip
+          - runner: windows-11-arm
+            target: win32-arm64
+            archive: zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: vscode/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci --prefix vscode
+      - name: Build native programs and VSIX
+        run: |
+          cargo build --release --bins
+          npm run compile --prefix vscode
+          node vscode/scripts/package.cjs ${{ matrix.target }}
+          node vscode/scripts/stage-release.cjs ${{ matrix.target }}
+      - name: Create tar.gz archive
+        if: matrix.archive == 'tar'
+        run: tar -C dist -czf dist/makedown-cli-${{ matrix.target }}.tar.gz makedown-cli-${{ matrix.target }}
+      - name: Create ZIP archive
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path dist/makedown-cli-${{ matrix.target }} -DestinationPath dist/makedown-cli-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: makedown-${{ matrix.target }}
+          path: |
+            vscode/*.vsix
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -d '' assets < <(find release-artifacts -type f -print0)
+          test "${#assets[@]}" -eq 12
+          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --title "Makedown ${GITHUB_REF_NAME}" --generate-notes

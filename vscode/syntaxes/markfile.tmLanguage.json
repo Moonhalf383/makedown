@@ -1,0 +1,32 @@
+{
+  "name": "Markfile",
+  "scopeName": "source.markfile",
+  "patterns": [
+    { "name": "punctuation.separator.markfile", "match": "^---[ \\t]*$" },
+    {
+      "name": "meta.target.markfile",
+      "begin": "^(#+)(?=[ \\t]|$)",
+      "end": "$",
+      "beginCaptures": { "1": { "name": "punctuation.definition.heading.markfile" } },
+      "patterns": [{ "name": "entity.name.target.markfile", "match": "\\S(?:.*\\S)?" }]
+    },
+    {
+      "name": "meta.directive.markfile",
+      "begin": "^(>)(?=[ \\t]|$)",
+      "end": "$",
+      "beginCaptures": { "1": { "name": "keyword.operator.directive.markfile" } },
+      "patterns": [
+        { "name": "keyword.control.anchor.markfile", "match": "\\b(?:crate|self|super)(?=::)" },
+        { "name": "keyword.control.alias.markfile", "match": "\\bas(?=[ \\t]+\\S)" },
+        { "name": "entity.name.target.reference.markfile", "match": "[^ \\t]+" }
+      ]
+    },
+    {
+      "name": "meta.specification.markfile",
+      "begin": "^(-)(?=[ \\t]|$)",
+      "end": "$",
+      "beginCaptures": { "1": { "name": "keyword.operator.specification.markfile" } },
+      "patterns": [{ "name": "string.unquoted.specification.markfile", "match": "\\S.*" }]
+    }
+  ]
+}
