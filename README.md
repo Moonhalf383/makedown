@@ -2,38 +2,25 @@
   <img src="https://raw.githubusercontent.com/Moonhalf383/makedown/main/assets/icon.png" alt="Makedown 图标" width="192">
 </p>
 
-```text
-███╗   ███╗ █████╗ ██╗  ██╗███████╗██████╗  ██████╗ ██╗    ██╗███╗   ██╗
-████╗ ████║██╔══██╗██║ ██╔╝██╔════╝██╔══██╗██╔═══██╗██║    ██║████╗  ██║
-██╔████╔██║███████║█████╔╝ █████╗  ██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║
-██║╚██╔╝██║██╔══██║██╔═██╗ ██╔══╝  ██║  ██║██║   ██║██║███╗██║██║╚██╗██║
-██║ ╚═╝ ██║██║  ██║██║  ██╗███████╗██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║
-╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝
+# Makedown
 
-   ██╗
-   ██║
-████████╗
-██╔═██╔═╝
-██████║
-╚═════╝
-
-███╗   ███╗ █████╗ ██████╗ ██╗  ██╗███████╗██╗██╗     ███████╗
-████╗ ████║██╔══██╗██╔══██╗██║ ██╔╝██╔════╝██║██║     ██╔════╝
-██╔████╔██║███████║██████╔╝█████╔╝ █████╗  ██║██║     █████╗
-██║╚██╔╝██║██╔══██║██╔══██╗██╔═██╗ ██╔══╝  ██║██║     ██╔══╝
-██║ ╚═╝ ██║██║  ██║██║  ██║██║  ██╗██║     ██║███████╗███████╗
-╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝
-```
-
----
-
-## Makefile + Markdown == Markfile + Makedown
+**Makefile + Markdown = Markfile + Makedown**
 
 Makedown 是一个把工作说明整理成实施计划的命令行工具。你在 Markfile（扩展名为 `.mf`）里写下要完成的目标、每个目标依赖的前置工作，以及完成时要核对的规格。`mkd` 读取这些内容，生成按阶段排列的 Markdown 文档。基础工作排在前面；同一阶段内的目标互不依赖，可以由实施者安排并行处理。这份文档可以交给团队成员，也可以交给协助实施的 AI 助手。
 
 想深入了解，可继续阅读：[示例项目](examples/README.md) · [项目配置说明](docs/config.md) · [模板写法](docs/templates.md) · [Neovim 配置说明](nvim/README.md) · [VS Code 插件说明](vscode/README.md)
 
-### Markfile 长什么样？
+## 安装
+
+通过 crates.io 安装命令行工具：
+
+```sh
+cargo install makedown-cli --locked
+```
+
+这个包会安装两个命令：`mkd` 用于检查 Markfile 和生成实施计划，`mkd-lsp` 为编辑器提供诊断、补全、跳转和格式化。安装完成后可运行 `mkd --version` 确认版本。也可以从 [GitHub Releases](https://github.com/Moonhalf383/makedown/releases) 下载适合当前平台的预编译程序。
+
+## Markfile 长什么样？
 
 下面是一份真实的 Markfile 片段，描述“组装并批准完整发布包”这项工作。文件分为三个区域：顶部用 `>` 引入其他文件中的目标，中间用 `---` 分隔出目标主体，底部再以 `> release` 把这个目标公开给其他文件使用。
 
@@ -61,26 +48,20 @@ Makedown 是一个把工作说明整理成实施计划的命令行工具。你�
 
 ## 先运行一个示例
 
-项目用 Rust 编写。从仓库根目录运行下面两条命令即可体验，无须提前安装 `mkd`：
+安装 `mkd` 后，在本仓库根目录运行下面两条命令：
 
 ```sh
-cargo run --quiet --bin mkd -- target greet --root examples/valid/01-single-target/main.mf --check
-cargo run --quiet --bin mkd -- target greet --root examples/valid/01-single-target/main.mf -o greeting-plan.md
+mkd target greet --root examples/valid/01-single-target/main.mf --check
+mkd target greet --root examples/valid/01-single-target/main.mf -o greeting-plan.md
 ```
 
 第一条命令检查工作说明，不写文件。第二条命令在仓库根目录生成 `greeting-plan.md`。打开它可以看到 `greet` 目标的工作说明和验收条目。如果不想在仓库里留下输出文件，把路径换成其他临时位置即可，例如 `/tmp/greeting-plan.md`（Windows 可用 `%TEMP%\greeting-plan.md`）。
 
-这里的 `target greet` 表示从名为 `greet` 的目标开始生成计划。`--root` 指定该示例项目的入口文件；在自己的项目中，工具会从当前目录向上寻找最近的 `main.mf`。从源码运行时，`cargo run --quiet --bin mkd --` 后面的内容就是传给 `mkd` 的参数；已经有可执行程序时，可以直接写 `mkd target greet ...`。
+这里的 `target greet` 表示从名为 `greet` 的目标开始生成计划。`--root` 指定该示例项目的入口文件；在自己的项目中，工具会从当前目录向上寻找最近的 `main.mf`。
 
-## 安装与写一份自己的工作说明
+## 写一份自己的工作说明
 
-通过 crates.io 安装命令行工具：
-
-```sh
-cargo install makedown-cli --locked
-```
-
-安装完成后，在准备存放项目的目录中运行：
+在准备存放项目的目录中运行：
 
 ```sh
 mkd init my-project
@@ -88,7 +69,7 @@ cd my-project
 mkd build
 ```
 
-工具会在 `my-project` 中创建入口文件 `main.mf` 和构建设置 `mkd.toml`，再将实施计划写入 `dist/plan.md`。新项目中的目标叫 `start`。也可以从 [GitHub Releases](https://github.com/Moonhalf383/makedown/releases) 下载适合当前平台的预编译程序。完整的初始化方式和配置写法见[项目配置说明](docs/config.md)。
+工具会在 `my-project` 中创建入口文件 `main.mf` 和构建设置 `mkd.toml`，再将实施计划写入 `dist/plan.md`。新项目中的目标叫 `start`。完整的初始化方式和配置写法见[项目配置说明](docs/config.md)。
 
 `mkd init` 创建的 `main.mf` 同样由上述三个区域组成，只是顶部导入区为空，文件以 `---` 开头。把示例文字改成自己的工作内容，再按同样的方式添加前置目标即可。
 
