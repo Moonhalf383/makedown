@@ -28,6 +28,12 @@ on:
       - 'LICENSE'
       - 'README.md'
   workflow_dispatch:
+    inputs:
+      publish_open_vsx:
+        description: Publish the six generated VSIX packages to Open VSX
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -128,3 +134,84 @@ jobs:
           mapfile -d '' assets < <(find release-artifacts -type f -print0)
           test "${#assets[@]}" -eq 12
           gh release create "${GITHUB_REF_NAME}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --title "Makedown ${GITHUB_REF_NAME}" --generate-notes
+
+  publish-open-vsx:
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_open_vsx)
+    needs: package
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: publish-open-vsx-makedown
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Open VSX CLI
+        run: npm install --global --prefix "$RUNNER_TEMP/ovsx" ovsx@1.2.0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Validate VSIX set
+        run: |
+          version=$(node -p "require('./vscode/package.json').version")
+          targets=(linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64)
+          mapfile -d '' packages < <(find release-artifacts -type f -name '*.vsix' -print0)
+          test "${#packages[@]}" -eq "${#targets[@]}"
+          for target in "${targets[@]}"; do
+            mapfile -t matches < <(find release-artifacts -type f -name "makedown-${target}-${version}.vsix" -print)
+            test "${#matches[@]}" -eq 1
+          done
+      - name: Create Open VSX namespace when absent
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          test -n "$OVSX_PAT"
+          status=$(curl --silent --show-error --output /tmp/open-vsx-namespace.json --write-out '%{http_code}' https://open-vsx.org/api/Moonhalf383)
+          case "$status" in
+            200) ;;
+            404)
+              set +e
+              output=$("$RUNNER_TEMP/ovsx/bin/ovsx" create-namespace Moonhalf383 2>&1)
+              result=$?
+              set -e
+              printf '%s\n' "$output"
+              if test "$result" -ne 0 && ! grep --ignore-case --quiet 'already exists' <<<"$output"; then
+                exit "$result"
+              fi
+              ;;
+            *) cat /tmp/open-vsx-namespace.json; exit 1 ;;
+          esac
+      - name: Publish VSIX packages to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          version=$(node -p "require('./vscode/package.json').version")
+          targets=(linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64)
+          for target in "${targets[@]}"; do
+            mapfile -t matches < <(find release-artifacts -type f -name "makedown-${target}-${version}.vsix" -print)
+            test "${#matches[@]}" -eq 1
+            "$RUNNER_TEMP/ovsx/bin/ovsx" publish "${matches[0]}" --skip-duplicate
+          done
+      - name: Verify Open VSX platforms
+        run: |
+          version=$(node -p "require('./vscode/package.json').version")
+          targets=(linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64)
+          for attempt in {1..30}; do
+            missing=()
+            for target in "${targets[@]}"; do
+              if ! curl --fail --silent --output /dev/null "https://open-vsx.org/api/Moonhalf383/makedown/${target}/${version}"; then
+                missing+=("$target")
+              fi
+            done
+            if test "${#missing[@]}" -eq 0; then
+              exit 0
+            fi
+            printf 'Waiting for Open VSX: %s\n' "${missing[*]}"
+            sleep 10
+          done
+          echo 'Open VSX did not expose every target within five minutes.' >&2
+          exit 1

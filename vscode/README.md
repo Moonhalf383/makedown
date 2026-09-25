@@ -2,7 +2,7 @@
 
 在 VS Code 中编辑 Markfile 工作说明（`.mf`）和 Markdown 排版模板（`.md.j2`）。Markfile 中的目标（Target）是一项工作，可以写下前置目标和验收规格；`mkd` 会把这些工作整理为分阶段的 Markdown 实施计划。关于 Markfile 的写法与命令行工具，见[项目 README](https://github.com/Moonhalf383/makedown#readme)。
 
-本插件提供语法高亮，并内置各平台版本的语言服务器 `mkd-lsp`（负责即时报错、补全等编辑辅助）：打开或编辑文件时即时检查，输入时给出候选；`.mf` 文件还支持跳转定义、查找引用和格式化。插件开箱即用，不需要用户安装 Rust 或任何其他组件。
+本插件提供语法高亮，并内置各平台版本的语言服务器 `mkd-lsp`（负责即时报错、补全等编辑辅助）：打开或编辑文件时即时检查，输入时给出候选；`.mf` 文件还支持跳转定义、查找引用和格式化。插件开箱即用，不需要用户安装 Rust 或任何其他组件。微软官方 VS Code 用户可从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Moonhalf383.makedown) 安装；Code - OSS、VSCodium 等使用 Open VSX 的编辑器可从 [Open VSX Registry](https://open-vsx.org/extension/Moonhalf383/makedown) 安装。
 
 ## 功能一览
 
