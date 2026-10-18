@@ -4,6 +4,8 @@
 
 # Makedown
 
+[English version](README.en.md)
+
 **Makefile + Markdown = Markfile + Makedown**
 
 Makedown 是一个把工作说明整理成实施计划的命令行工具。你在 Markfile（扩展名为 `.mf`）里写下要完成的目标、每个目标依赖的前置工作，以及完成时要核对的规格。`mkd` 读取这些内容，生成按阶段排列的 Markdown 文档。基础工作排在前面；同一阶段内的目标互不依赖，可以由实施者安排并行处理。这份文档可以交给团队成员，也可以交给协助实施的 AI 助手。
